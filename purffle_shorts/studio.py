@@ -530,7 +530,10 @@ class StudioServer:
             channel_name=profile.get("channel_name", self.settings.channel_name),
             audience=profile.get("audience", self.settings.audience),
             token_file=profile.get("token_file", self.settings.token_file))
-        self.studio.settings = self.settings
+        # Pipeline Studio consumes Settings through .s; clear its cached LLM so provider
+        # switches take effect immediately instead of continuing to use the previous model.
+        self.studio.s = self.settings
+        self.studio._llm = None
         self.studio.history.set_meta("studio_active_profile", str(name))
         return {"profile": profile, "active": str(name)}
 
