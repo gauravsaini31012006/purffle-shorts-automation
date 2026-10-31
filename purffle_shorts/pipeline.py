@@ -592,11 +592,12 @@ class Studio:
             return rec["status"]
         # Hard rolling-window safety cap. Count scheduled uploads too: they already consumed an upload
         # and are intended to become public. This deliberately errs on the safe side.
+        rolling_cap = min(2, max(1, int(self.s.max_uploads_24h)))
         if on_youtube and self.history.youtube_uploads_last_24h(
                 (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
-        ) >= self.s.max_uploads_24h:
+        ) >= rolling_cap:
             log.warning("Rolling 24-hour YouTube upload cap (%d) reached — video #%d queued",
-                        self.s.max_uploads_24h, rid)
+                        rolling_cap, rid)
             self.history.update_video(rid, status="queued")
             if result:
                 result.status = "queued"
