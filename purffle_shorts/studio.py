@@ -361,7 +361,6 @@ class StudioServer:
                 CANCEL.clear()
                 if job.params.get("scheduled"):
                     state = self.automation_state()
-                    scheduled_followup = None
                     schedule_stats = False
                     detail = (job.result.get("error") if isinstance(job.result, dict) else "") or job.message or job.status
                     if job.kind == "plan":
@@ -371,7 +370,9 @@ class StudioServer:
                         # The scheduler independently polls for approved ideas, so approvals made
                         # after research still enter today's production run.
                     elif job.kind == "make_idea":
-                        state["last_production_run"] = time.strftime("%Y-%m-%d")
+                        from datetime import datetime
+                        from zoneinfo import ZoneInfo
+                        state["last_production_run"] = datetime.now(ZoneInfo(state["timezone"])).date().isoformat()
                         state["last_production_status"] = job.status
                         state["last_production_message"] = detail or (
                             f"Production finished: {job.result.get('title', 'video')}" if job.status == "done"
@@ -381,10 +382,8 @@ class StudioServer:
                     elif job.kind == "stats":
                         state["last_production_message"] = "Channel analytics refreshed" if job.status == "done" else detail
                     self.studio.history.set_meta("studio_automation", json.dumps(state))
-                    # Store state before queueing follow-ups so a very fast worker cannot be overwritten
+                    # Persist state before queueing analytics so its worker cannot be overwritten
                     # by the parent job's stale state snapshot.
-                    if scheduled_followup:
-                        self.submit(*scheduled_followup)
                     if schedule_stats:
                         self.submit("stats", {"scheduled": True}, "Scheduled channel analytics sync")
                     from . import notify
