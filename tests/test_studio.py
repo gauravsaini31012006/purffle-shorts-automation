@@ -212,6 +212,22 @@ def test_page_has_no_inline_styles_or_scripts(server):
     assert not re.search(r"""\sstyle=["']""", js)
 
 
+def test_automation_settings_are_persistent_and_validated(server):
+    app, port = server
+    initial = json.loads(req(port, "GET", "/api/automation")[2])
+    assert initial["enabled"] is False
+    assert initial["mode"] == "research_only"
+    status, _, body = req(port, "POST", "/api/automation",
+                          {"enabled": True, "plan_time": "08:45", "timezone": "Asia/Kolkata",
+                           "ideas_per_run": 12}, app.token)
+    assert status == 200, body
+    saved = json.loads(req(port, "GET", "/api/automation")[2])
+    assert saved["enabled"] is True and saved["plan_time"] == "08:45"
+    assert saved["timezone"] == "Asia/Kolkata" and saved["ideas_per_run"] == 12
+    status, _, body = req(port, "POST", "/api/automation", {"plan_time": "25:99"}, app.token)
+    assert status == 400 and b"HH:MM" in body
+
+
 def test_profile_api_persists_and_applies_settings(server):
     app, port = server
     assert req(port, "GET", "/api/profiles")[0] == 200
