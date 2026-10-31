@@ -155,6 +155,9 @@ class StudioServer:
                 "last_production_retry_at": state.get("last_production_retry_at"),
                 "last_upload_flush": state.get("last_upload_flush"),
                 "last_upload_flush_message": state.get("last_upload_flush_message") or "",
+                "last_stats_sync": state.get("last_stats_sync"),
+                "last_stats_status": state.get("last_stats_status") or "idle",
+                "last_stats_message": state.get("last_stats_message") or "",
                 "mode": "review_required" if not state.get("auto_approve_ideas") else "auto_approval_enabled"}
 
     def update_automation(self, payload: dict) -> dict:
@@ -496,7 +499,13 @@ class StudioServer:
                             f"Uploaded {count} queued video(s)" if job.status == "done" else detail
                         )
                     elif job.kind == "stats":
-                        state["last_production_message"] = "Channel analytics refreshed" if job.status == "done" else detail
+                        from datetime import datetime
+                        from zoneinfo import ZoneInfo
+                        state["last_stats_sync"] = datetime.now(ZoneInfo(state["timezone"])).isoformat(timespec="seconds")
+                        state["last_stats_status"] = job.status
+                        state["last_stats_message"] = (
+                            f"Updated {job.result.get('updated', 0)} video(s)" if job.status == "done" else detail
+                        )
                     self.studio.history.set_meta("studio_automation", json.dumps(state))
                     # Persist state before queueing analytics so its worker cannot be overwritten
                     # by the parent job's stale state snapshot.
@@ -506,6 +515,7 @@ class StudioServer:
                     notification_detail = (
                         state["last_message"] if job.kind == "plan" else
                         state["last_upload_flush_message"] if job.kind == "flush_uploads" else
+                        state["last_stats_message"] if job.kind == "stats" else
                         state["last_production_message"]
                     )
                     if job.status != "done":
