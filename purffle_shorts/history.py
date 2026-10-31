@@ -45,6 +45,7 @@ VIDEO_COLUMNS = {
     "score": "INTEGER",            # Script Doctor retention score, 0-100
     "parent_id": "INTEGER",        # the original video when this one is a translated copy
     "views": "INTEGER", "likes": "INTEGER", "comments": "INTEGER", "stats_at": "TEXT",
+    "youtube_privacy": "TEXT",
 }
 
 
@@ -130,7 +131,8 @@ class History:
     def youtube_uploads_last_24h(self, since_iso: str) -> int:
         """Count completed YouTube uploads in a rolling window (scheduled uploads count conservatively)."""
         return self._all(
-            "SELECT COUNT(*) AS n FROM videos WHERE youtube_id IS NOT NULL AND uploaded_at >= ?",
+            "SELECT COUNT(*) AS n FROM videos WHERE youtube_id IS NOT NULL AND uploaded_at >= ? "
+            "AND COALESCE(youtube_privacy, 'public') = 'public'",
             (since_iso,),
         )[0]["n"]
 
