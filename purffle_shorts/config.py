@@ -184,6 +184,7 @@ class Settings:
     publish_times: list[str] = field(default_factory=list)  # e.g. 09:00,14:00,19:00 -> scheduled
     timezone: str = ""
     daily_upload_limit: int = 6       # a pace; the API gives uploads their own bucket of 100 a day
+    max_uploads_24h: int = 2          # conservative rolling 24h ceiling for YouTube uploads
     made_for_kids: bool = False
     synthetic_media: bool = True      # YouTube "altered or synthetic content" disclosure
     playlist_id: str = ""
@@ -354,6 +355,7 @@ class Settings:
             publish_times=_list(_env("PUBLISH_TIMES")),
             timezone=_env("TIMEZONE"),
             daily_upload_limit=_int("YT_DAILY_LIMIT", d.daily_upload_limit),
+            max_uploads_24h=max(1, _int("MAX_PUBLIC_UPLOADS_24H", d.max_uploads_24h)),
             made_for_kids=_bool(_env("MADE_FOR_KIDS", "false")),
             synthetic_media=_bool(_env("SYNTHETIC_MEDIA", "true")),
             playlist_id=_env("PLAYLIST_ID"),
