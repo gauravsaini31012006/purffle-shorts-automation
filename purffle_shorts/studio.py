@@ -595,10 +595,10 @@ class StudioServer:
                 pass
             temp.replace(env_path)
             os.environ.update(updates)
-        from .config import Settings
-        fresh = Settings.from_env()
-        # Preserve the safe publishing default: credentials alone never turn publishing on.
-        fresh = fresh.with_overrides(upload=self.settings.upload)
+        field_updates = {field_name: updates[env_name] for env_name, field_name in allowed.items()
+                         if env_name in updates}
+        # Keep all current runtime choices; only replace the fields explicitly edited in Setup.
+        fresh = self.settings.with_overrides(**field_updates)
         from .pipeline import Studio
         self.settings = fresh
         self.studio = Studio(fresh)
