@@ -545,11 +545,23 @@ class StudioServer:
         by_style: dict[str, list[int]] = {}
         for r in rows:
             by_style.setdefault(r["style"] or "other", []).append(r["views"])
+        total_views = sum(r.get("views") or 0 for r in rows)
+        total_likes = sum(r.get("likes") or 0 for r in rows)
+        total_comments = sum(r.get("comments") or 0 for r in rows)
         return {"videos": [{"id": r["id"], "title": r["title"], "views": r["views"], "likes": r["likes"],
                             "comments": r["comments"], "score": r.get("score"), "style": r["style"],
+                            "engagement_rate": round(100 * ((r.get("likes") or 0) + (r.get("comments") or 0)) /
+                                                     max(1, r["views"]), 2),
                             "youtube_id": r["youtube_id"]} for r in sorted(rows, key=lambda r: -r["views"])[:100]],
-                "by_style": sorted(({"style": k, "videos": len(v), "avg_views": round(sum(v) / len(v))}
+                "by_style": sorted(({"style": k, "videos": len(v), "avg_views": round(sum(v) / len(v)),
+                                     "avg_engagement_rate": round(100 * sum(
+                                         ((r.get("likes") or 0) + (r.get("comments") or 0)) / max(1, r["views"])
+                                         for r in rows if (r.get("style") or "other") == k) / len(v), 2)}
                                     for k, v in by_style.items()), key=lambda x: -x["avg_views"]),
+                "summary": {"videos_with_stats": len(rows), "views": total_views, "likes": total_likes,
+                            "comments": total_comments,
+                            "engagement_rate": round(100 * (total_likes + total_comments) / max(1, total_views), 2),
+                            "avg_views": round(total_views / len(rows)) if rows else 0},
                 "synced": max((r.get("stats_at") or "" for r in rows), default=""),
                 "calibration": calibration(self.studio.history)}
 
