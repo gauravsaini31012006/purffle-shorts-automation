@@ -460,10 +460,12 @@ class StudioServer:
             angle = (idea.get("notes") or "").strip()
             topic = f'{idea["subject"]} (angle: {angle})' if angle else idea["subject"]
             try:
-                # Render first and link the idea before attempting any network upload. A YouTube
-                # authorization or quota problem must not cause a second copy of a finished Short.
-                r = studio.make(topic, upload=False,
-                                style=idea.get("style") or (s.style if s.style != "auto" else None))
+                # Keep the idea ID attached to the pipeline Topic. The pipeline links it as soon as
+                # the video record is created, which makes a completed render recoverable after a restart.
+                script, pick, writer = studio.draft(topic,
+                    style=idea.get("style") or (s.style if s.style != "auto" else None))
+                pick.idea_id = idea_id
+                r = studio.produce(script, pick, writer, upload=False)
             except Exception:
                 studio.history.release_idea(idea_id)
                 raise
