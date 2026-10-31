@@ -93,7 +93,7 @@ def plan_ideas(llm, settings: Settings, history: History, count: int = 10, niche
         seen.add(subject.lower())
         style = idea.get("style") if idea.get("style") in STYLES else ""
         angle = str(idea.get("angle") or "").strip()
-        iid = history.add_idea(subject, style, angle)
+        iid = history.add_idea(subject, style, angle, approved=False)
         saved.append({"id": iid, "subject": subject, "style": style, "notes": angle})
     log.info("Planner added %d idea(s) to the queue", len(saved))
     return saved
