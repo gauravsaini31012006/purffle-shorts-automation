@@ -254,7 +254,9 @@ def test_profile_api_persists_and_applies_settings(server):
     assert req(port, "GET", "/api/profiles")[0] == 200
     payload = {"name": "Space Lab", "niche": "space science", "style": "explainer",
                "language": "en", "duration": 55, "aspect": "9:16",
-               "visual_style": "cinematic documentary"}
+               "visual_style": "cinematic documentary", "provider": "gemini",
+               "model": "gemini-2.5-flash", "channel_name": "Space Lab TV",
+               "audience": "curious science fans"}
     status, _, body = req(port, "POST", "/api/profiles/save", payload, app.token)
     assert status == 200, body
     assert app.settings.niches == ["space science"]
@@ -262,8 +264,21 @@ def test_profile_api_persists_and_applies_settings(server):
     data = json.loads(req(port, "GET", "/api/profiles")[2])
     assert data["active"] == "Space Lab"
     assert data["profiles"]["Space Lab"]["visual_style"] == "cinematic documentary"
+    assert data["profiles"]["Space Lab"]["provider"] == "gemini"
+    assert app.settings.llm_model == "gemini-2.5-flash"
+    assert app.settings.channel_name == "Space Lab TV"
     status, _, _ = req(port, "POST", "/api/profiles/apply", {"name": "missing"}, app.token)
     assert status == 400
     status, _, _ = req(port, "POST", "/api/profiles/delete", {"name": "Space Lab"}, app.token)
     assert status == 200
     assert "Space Lab" not in json.loads(req(port, "GET", "/api/profiles")[2])["profiles"]
+
+
+def test_setup_status_never_exposes_secret_values(server):
+    app, port = server
+    status, _, body = req(port, "GET", "/api/setup")
+    assert status == 200
+    data = json.loads(body)
+    assert "llm_api_key" not in data
+    assert "openai_api_key" not in data
+    assert "youtube_connected" in data
