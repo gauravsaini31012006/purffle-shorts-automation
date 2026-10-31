@@ -1035,7 +1035,7 @@ async function viewAutomation(){
  <div class="form-actions"><button class="btn primary" type="submit">Save scheduler</button></div></form>
  <p class="hint">Daily automation can research, optionally auto-approve ideas, and render one approved idea. Publishing is a separate opt-in, requires the Setup upload switch and YouTube OAuth, and still obeys the rolling upload cap. Leave auto-approval off to keep editorial review in your workflow.</p>
  <div class="check"><span>Last research run</span><b>${esc(a.last_run||"Never")} · ${esc(a.last_status)} · ${esc(a.last_message||"")}</b></div>
- <div class="check"><span>Last production run</span><b>${esc(a.last_production_run||"Never")} · ${esc(a.last_production_status)} · ${esc(a.last_production_message||"")}</b></div>
+ <div class="check"><span>Last production run</span><b>${esc(a.last_production_run||"Never")} · ${esc(a.last_production_status)} · ${a.last_production_attempts||0}/2 attempts · ${esc(a.last_production_message||"")}</b></div>
  <div class="check"><span>Queued upload retry</span><b>${esc(a.last_upload_flush||"Never")} · ${esc(a.last_upload_flush_message||"Not scheduled")}</b></div>
  </section>
  <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Live production queue</h2><button class="btn sm" id="auto-refresh">Refresh</button></header>${active.length?active.map(x=>`<div class="check"><b>#${x.id} · ${esc(x.label)}</b><span>${esc(x.stage)} · ${x.pct}% · ${esc(x.status)}</span></div>`).join(""):empty("IDLE","No active jobs","Create or plan a job in Studio.")}</section>
