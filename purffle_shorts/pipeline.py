@@ -387,7 +387,7 @@ class Studio:
         state["folder"] = folder
         work = folder / "work"
         work.mkdir(parents=True, exist_ok=True)
-        (folder / "script.json").write_text(json.dumps(script.to_dict(), indent=2, ensure_ascii=False))
+        (folder / "script.json").write_text(json.dumps(script.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
         try:
             self._step("voice", f"{s.tts_engine} voice")
             speech = self._speak(script, work, s)
@@ -497,7 +497,7 @@ class Studio:
                             for m in media + ([background] if split else [])],
                 "parent_id": parent_id, "created_at": now_iso(),
             }
-            (folder / "metadata.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+            (folder / "metadata.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
             rid = self.history.add_video(
                 subject=pick.subject, source=pick.source, topic=script.topic, style=script.style,
@@ -583,7 +583,7 @@ class Studio:
         to = list(dict.fromkeys(self.s.publish_to or ["youtube"]))
         folder = Path(rec["folder"])
         meta_file = folder / "metadata.json"
-        meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+        meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
         posted = dict(meta.get("published") or {})
         on_youtube = "youtube" in to and not rec.get("youtube_id")
         others = [p for p in to if p != "youtube" and (posted.get(p) or {}).get("status") not in crosspost.DONE]
@@ -622,7 +622,7 @@ class Studio:
             results = crosspost.publish(self.s, Path(rec["video_path"]), meta, others, when)
             posted.update({p: r.to_dict() for p, r in results.items()})
             meta["published"] = posted
-            meta_file.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+            meta_file.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
             out = [r for r in results.values() if r.status in crosspost.DONE]
             failed = [r for r in results.values() if r.status not in crosspost.DONE]
             for r in out:
