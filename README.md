@@ -595,6 +595,8 @@ Common options: `--source queue|search|trending|wikipedia|reddit|rss|file|niche`
 python -m purffle_shorts studio        # opens http://127.0.0.1:8765
 ```
 
+On Windows, double-click `Start-Studio.bat` from the fork folder to start Studio and open its local page. Keep the console window open while automation is running.
+
 - **Create:** topic, web page, idea queue or "surprise me"; eleven formats; language, length, aspect, voices, caption style (with a preview), grade, transitions, footage sources, a background video (full or split screen), sound effects, key-word colours, emoji, model, Script Doctor mode, extra languages, and publishing to YouTube, TikTok and Instagram.
 - **Draft, then edit:** the AI writes and reviews the script, you see the retention score and the problems it found, change any line, reorder or add scenes, switch speakers, then render exactly that script.
 - **Live progress** through topic, script, review, voice, footage, captions, render and upload, with the log.
