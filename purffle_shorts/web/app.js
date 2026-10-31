@@ -63,7 +63,7 @@ const MULTI = new Set(["dialogue", "chat"]);
 const STAGES = [["topic", "Topic"], ["script", "Script"], ["review", "Review"], ["voice", "Voice"], ["footage", "Footage"],
   ["captions", "Captions"], ["render", "Render"], ["check", "Check"], ["upload", "Upload"]];
 const STATUS_CHIP = { uploaded: "ok", scheduled: "blue", rendered: "accent", queued: "", failed: "bad" };
-const VIEW_NO = { create: "01", library: "02", queue: "03", ideas: "04", clip: "05", channel: "06", system: "07", profiles: "08", automation: "09", tracking: "10" };
+const VIEW_NO = { setup: "00", create: "01", library: "02", queue: "03", ideas: "04", clip: "05", channel: "06", system: "07", profiles: "08", automation: "09", tracking: "10" };
 // The page heading: a numbered eyebrow, the title and one line of what the page is for.
 function head(view, title, text, aside = "") {
   return `<div class="page-head"><div><p class="eyebrow"><b>${VIEW_NO[view] || "00"}</b>Studio</p><h1>${title}</h1>${text ? `<p>${text}</p>` : ""}</div>${aside}</div>`;
@@ -193,7 +193,7 @@ function status() {
   ib.textContent = i.ideas;
 }
 
-const VIEWS = { create: viewCreate, library: viewLibrary, queue: viewQueue, ideas: viewIdeas, clip: viewClip, channel: viewChannel, system: viewSystem, profiles: viewProfiles, automation: viewAutomation, tracking: viewTracking };
+const VIEWS = { setup: viewSetup, create: viewCreate, library: viewLibrary, queue: viewQueue, ideas: viewIdeas, clip: viewClip, channel: viewChannel, system: viewSystem, profiles: viewProfiles, automation: viewAutomation, tracking: viewTracking };
 function route() {
   const v = (location.hash || "#create").slice(1).split("/")[0];
   S.view = VIEWS[v] ? v : "create";
@@ -957,6 +957,35 @@ async function viewTracking(){
  main.innerHTML=head("tracking","Production tracking","Follow every video from creation through publishing and performance sync.")+"<div class=\"kpis\"><div class=\"kpi\"><small>Tracked videos</small><b>"+total+"</b></div><div class=\"kpi\"><small>Ready / queued</small><b>"+ready+"</b></div><div class=\"kpi\"><small>Uploaded / scheduled</small><b>"+live+"</b></div><div class=\"kpi\"><small>Failed</small><b>"+failed+"</b></div></div><section class=\"card\"><header class=\"sheet-h\"><span class=\"n\">01</span><h2>Video lifecycle</h2><button class=\"btn sm\" id=\"track-refresh\">Refresh</button></header>"+(videos.length?"<table><thead><tr><th>Video</th><th>State</th><th>Format</th><th>Created</th><th>Views</th><th>Likes</th></tr></thead><tbody>"+rows+"</tbody></table>":empty("NO VIDEOS","Nothing to track yet","Rendered videos will appear here."))+"</section><section class=\"card\"><header class=\"sheet-h\"><span class=\"n\">02</span><h2>Recent job activity</h2></header>"+jobs.slice(0,12).map(j=>"<div class=\"check\"><b>#"+j.id+" · "+esc(j.label)+"</b><span>"+esc(j.kind)+" · "+esc(j.status)+" · "+j.pct+"%</span></div>").join("")+"</section>";
  $("#track-refresh").onclick=viewTracking;
 }
+async function viewSetup() {
+  const main=$("#main");
+  const d=await get("/api/setup");
+  if(S.view!=="setup")return;
+  const state=(ok,label)=>`<div class="check"><span>${label}</span><b>${ok?"Connected / ready":"Not configured"}</b></div>`;
+  main.innerHTML=`${head("setup","Welcome to PurffleShorts","Create your creator workspace, connect the services you choose, and update them whenever your setup changes.") }
+  <section class="card"><header class="sheet-h"><span class="n">01</span><h2>Your workspace</h2></header>
+  <p class="hint">Start by creating a named creator profile under Profiles. Each profile can keep its own niche, channel identity, LLM provider/model and production preferences.</p>
+  <div class="actions"><a class="btn primary" href="#profiles">Create creator profile</a></div></section>
+  <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Connect your services</h2></header>
+  <div class="checks">${state(d.llm_key_set,"LLM API credential")}${state(d.pexels_key_set,"Pexels visuals")}${state(d.pixabay_key_set,"Pixabay visuals")}${state(d.elevenlabs_key_set,"ElevenLabs voice")}${state(d.youtube_client_file,"Google OAuth client file")}${state(d.youtube_connected,"YouTube account")}</div>
+  <form id="setup-form" class="form-grid">
+  <label>LLM provider<input name="llm_provider" value="${esc(d.llm_provider||"auto")}" placeholder="openai, gemini, anthropic, ollama"></label>
+  <label>Model<input name="llm_model" value="${esc(d.llm_model||"")}" placeholder="e.g. gemini-2.5-flash"></label>
+  <label class="wide">LLM API key<input name="llm_api_key" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved key"></label>
+  <label>OpenAI API key<input name="openai_api_key" type="password" autocomplete="new-password" placeholder="Optional"></label>
+  <label>Pexels API key<input name="pexels_api_key" type="password" autocomplete="new-password" placeholder="Optional free visuals"></label>
+  <label>Pixabay API key<input name="pixabay_api_key" type="password" autocomplete="new-password" placeholder="Optional free visuals"></label>
+  <label>ElevenLabs API key<input name="elevenlabs_api_key" type="password" autocomplete="new-password" placeholder="Optional voice"></label>
+  <label class="wide">Google OAuth Desktop client JSON<textarea name="youtube_client_json" rows="5" placeholder="Paste the contents of your Google OAuth Desktop app credentials JSON. You can also place it at credentials.json yourself."></textarea></label>
+  <div class="actions wide"><button class="btn primary" type="submit">Save credentials securely on this computer</button><button class="btn" type="button" id="youtube-connect" ${d.youtube_client_file?"":"disabled"}>Connect YouTube account</button><button class="btn" type="button" id="setup-refresh">Refresh connection status</button></div>
+  </form><p class="hint">Secrets are saved only in this local installation's .env file and are never returned to the dashboard. Google OAuth tokens are stored locally. Keep this computer private; do not share .env, credentials.json or token.json. YouTube publishing stays disabled until you explicitly enable it in your local configuration.</p>
+  <div class="check"><span>YouTube authentication</span><b>${esc(d.youtube_auth_status||"not_started")}</b></div>
+  </section>`;
+  $("#setup-form").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f.entries());try{const result=await post("/api/setup",body);toast("Credentials saved. Secret values are not displayed again.","ok");viewSetup()}catch(err){toast(esc(err.message),"bad")}};
+  $("#youtube-connect").onclick=async()=>{try{await post("/api/youtube/connect",{});toast("Google sign-in started. Complete consent in the browser window, then refresh status.","ok");}catch(err){toast(esc(err.message),"bad")}};
+  $("#setup-refresh").onclick=viewSetup;
+}
+
 async function viewProfiles() {
   const main=$("#main");
   main.innerHTML=`${head("profiles","Content profiles","Save reusable niche and production settings in your local Studio database.")}<section class="card"><div id="profile-list">Loading…</div></section>
