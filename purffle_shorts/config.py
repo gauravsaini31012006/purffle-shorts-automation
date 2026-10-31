@@ -355,7 +355,7 @@ class Settings:
             publish_times=_list(_env("PUBLISH_TIMES")),
             timezone=_env("TIMEZONE"),
             daily_upload_limit=_int("YT_DAILY_LIMIT", d.daily_upload_limit),
-            max_uploads_24h=max(1, _int("MAX_PUBLIC_UPLOADS_24H", d.max_uploads_24h)),
+            max_uploads_24h=min(2, max(1, _int("MAX_PUBLIC_UPLOADS_24H", d.max_uploads_24h))),
             made_for_kids=_bool(_env("MADE_FOR_KIDS", "false")),
             synthetic_media=_bool(_env("SYNTHETIC_MEDIA", "true")),
             playlist_id=_env("PLAYLIST_ID"),
