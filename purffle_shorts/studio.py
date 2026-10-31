@@ -109,6 +109,75 @@ class StudioServer:
         self._changed = threading.Condition()
         logging.getLogger().addHandler(_JobLog(self))
         threading.Thread(target=self._worker, name="studio-worker", daemon=True).start()
+        self._scheduler_stop = threading.Event()
+        threading.Thread(target=self._scheduler_loop, name="studio-scheduler", daemon=True).start()
+
+    def automation_state(self) -> dict:
+        try:
+            state = json.loads(self.studio.history.get_meta("studio_automation") or "{}")
+        except (TypeError, ValueError):
+            state = {}
+        if not isinstance(state, dict):
+            state = {}
+        return {"enabled": bool(state.get("enabled", False)),
+                "plan_time": str(state.get("plan_time") or "09:00"),
+                "timezone": str(state.get("timezone") or self.settings.timezone or "Asia/Kolkata"),
+                "ideas_per_run": max(1, min(30, int(state.get("ideas_per_run") or 8))),
+                "last_run": state.get("last_run"),
+                "last_status": state.get("last_status") or "idle",
+                "last_message": state.get("last_message") or "",
+                "mode": "research_only"}
+
+    def update_automation(self, payload: dict) -> dict:
+        state = self.automation_state()
+        if "enabled" in payload:
+            state["enabled"] = bool(payload["enabled"])
+        if "plan_time" in payload:
+            value = str(payload["plan_time"])
+            if not re.fullmatch(r"(?:[01]\\d|2[0-3]):[0-5]\\d", value):
+                raise ValueError("Plan time must be HH:MM (24-hour time)")
+            state["plan_time"] = value
+        if "timezone" in payload:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            value = str(payload["timezone"]).strip()[:64]
+            try:
+                ZoneInfo(value)
+            except (ZoneInfoNotFoundError, ValueError):
+                raise ValueError("Unknown IANA timezone") from None
+            state["timezone"] = value
+        if "ideas_per_run" in payload:
+            try:
+                state["ideas_per_run"] = max(1, min(30, int(payload["ideas_per_run"])))
+            except (TypeError, ValueError):
+                raise ValueError("Ideas per run must be a number") from None
+        self.studio.history.set_meta("studio_automation", json.dumps(state))
+        self.changed()
+        return state
+
+    def _scheduler_loop(self) -> None:
+        while not self._scheduler_stop.wait(15):
+            try:
+                state = self.automation_state()
+                if not state["enabled"]:
+                    continue
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                now = datetime.now(ZoneInfo(state["timezone"]))
+                if now.strftime("%H:%M") < state["plan_time"]:
+                    continue
+                if state.get("last_run") == now.date().isoformat():
+                    continue
+                # Persist the date before queueing: a restart cannot enqueue duplicate daily research.
+                state["last_run"] = now.date().isoformat()
+                state["last_status"] = "queued"
+                state["last_message"] = "Daily idea research queued"
+                self.studio.history.set_meta("studio_automation", json.dumps(state))
+                profile = self.profiles()["profiles"].get(self.profiles()["active"], {})
+                niche = profile.get("niche") or (self.settings.niches[0] if self.settings.niches else "")
+                self.submit("plan", {"count": state["ideas_per_run"], "niche": niche, "scheduled": True},
+                            "Scheduled daily idea research")
+            except Exception:
+                log.exception("Daily research scheduler failed")
 
     def changed(self) -> None:
         with self._changed:
@@ -591,6 +660,8 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                 return self._json(app.options())
             if path == "/api/profiles":
                 return self._json(app.profiles())
+            if path == "/api/automation":
+                return self._json(app.automation_state())
             if path == "/api/videos":
                 return self._json(app.videos(params.get("status", ""), params.get("q", "")))
             m = re.fullmatch(r"/api/videos/(\d+)", path)
@@ -681,6 +752,11 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                 return self._json({"error": "expected an object"}, 400)
             path = self.path
             h = app.studio.history
+            if path == "/api/automation":
+                try:
+                    return self._json(app.update_automation(body))
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
             if path == "/api/profiles/save":
                 try:
                     return self._json(app.save_profile(body))
