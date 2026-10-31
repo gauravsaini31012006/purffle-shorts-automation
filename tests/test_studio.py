@@ -439,3 +439,44 @@ def test_scheduler_recovers_claimed_idea_after_restart(server, monkeypatch):
     recovered = app.studio.history.get_idea(idea_id)
     assert recovered["status"] == "pending" and recovered["approved"] == 1
 
+def test_scheduler_retries_failed_production_after_cooldown(server, monkeypatch):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    app, _ = server
+    tz = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(tz)
+    today = now.date().isoformat()
+    idea_id = app.studio.history.add_idea("Retry this scheduled Short", approved=True)
+    app.studio.history.set_meta("studio_automation", json.dumps({
+        "enabled": True, "plan_time": "00:00", "timezone": "Asia/Kolkata", "ideas_per_run": 5,
+        "auto_approve_ideas": False, "auto_produce": True, "auto_publish": False, "auto_sync_stats": False,
+        "last_run": today, "last_status": "done", "last_production_run": today,
+        "last_production_status": "failed", "last_production_idea_id": idea_id,
+        "last_production_attempts": 1,
+        "last_production_retry_at": (now - timedelta(minutes=1)).isoformat(timespec="seconds"),
+    }))
+
+    class OnePass:
+        calls = 0
+        def wait(self, _seconds):
+            self.calls += 1
+            return self.calls > 1
+
+    app._scheduler_stop = OnePass()
+    queued = []
+
+    class StubJob:
+        id = 456
+
+    monkeypatch.setattr(app, "submit", lambda kind, params, label="": (
+        queued.append((kind, params, label)) or StubJob()))
+    app._scheduler_loop()
+
+    assert queued and queued[0][0] == "make_idea"
+    assert queued[0][1]["idea_id"] == idea_id
+    assert queued[0][1]["scheduled"] is True
+    state = app.automation_state()
+    assert state["last_production_status"] == "queued"
+    assert state["last_production_attempts"] == 1
+    assert state["last_production_retry_at"] is None
