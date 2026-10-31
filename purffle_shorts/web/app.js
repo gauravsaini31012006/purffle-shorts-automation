@@ -819,7 +819,7 @@ async function viewIdeas() {
   if (S.view !== "ideas") return;
   const styles = [["", "Any format"], ...FORMATS.filter(([k]) => k !== "auto").map(([k, n]) => [k, n])];
   main.innerHTML = `
-  ${head("ideas", "Ideas", "Plan a week of videos in one go. The autopilot and Create's idea queue always use these first, oldest first.")}
+  ${head("ideas", "Ideas", "Discover ideas, review them, approve the ones you want, then render them or schedule daily production.")}
   <div class="grid2">
     <section class="card">${sh("01", "Plan with AI", "uses real YouTube searches")}
       <div class="field"><label>Niche (optional)</label><input type="text" id="plan-niche" placeholder="e.g. space and the universe — blank uses your NICHES"></div>
@@ -1019,10 +1019,10 @@ async function viewAutomation(){
  const [i,j,a,d]=await Promise.all([get("/api/info"),get("/api/jobs"),get("/api/automation"),get("/api/setup")]);
  if(S.view!=="automation")return;
  const active=j.filter(x=>["queued","running"].includes(x.status));
- main.innerHTML=`${head("automation","Automation","Configure daily research and monitor the production pipeline.")}<div class="kpis"><div class="kpi"><small>Queue state</small><b>${active.length?"Active":"Idle"}</b></div><div class="kpi"><small>Active jobs</small><b>${active.length}</b></div><div class="kpi"><small>Ideas waiting</small><b>${i.ideas}</b></div><div class="kpi"><small>Publishing</small><b>${i.upload?"Enabled in config":"Disabled"}</b></div></div>
+ main.innerHTML=`${head("automation","Automation","Configure daily research, approved-idea rendering and optional YouTube publishing.")}<div class="kpis"><div class="kpi"><small>Queue state</small><b>${active.length?"Active":"Idle"}</b></div><div class="kpi"><small>Active jobs</small><b>${active.length}</b></div><div class="kpi"><small>Ideas waiting</small><b>${i.ideas}</b></div><div class="kpi"><small>Publishing</small><b>${i.upload?"Enabled in config":"Disabled"}</b></div></div>
  <section class="card"><header class="sheet-h"><span class="n">01</span><h2>Daily research scheduler</h2></header>
  <form id="automation-form" class="form-grid">
- <label class="check"><span>Enable daily research</span><input name="enabled" type="checkbox" ${a.enabled?"checked":""}></label>
+ <label class="check"><span>Enable daily automation</span><input name="enabled" type="checkbox" ${a.enabled?"checked":""}></label>
  <label>Run time (24-hour)<input name="plan_time" type="time" value="${esc(a.plan_time)}" required></label>
  <label>Timezone (IANA)<input name="timezone" value="${esc(a.timezone)}" placeholder="Asia/Kolkata" required></label>
  <label>Ideas per run<input name="ideas_per_run" type="number" min="1" max="30" value="${a.ideas_per_run}"></label>
