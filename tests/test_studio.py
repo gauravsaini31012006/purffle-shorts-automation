@@ -315,6 +315,7 @@ def test_setup_saves_credentials_without_returning_secret(server, tmp_path, monk
     state = json.loads(req(port, "GET", "/api/setup")[2])
     assert state["llm_key_set"] is True and state["telegram_configured"] is True
 
+
 def test_ideas_require_approval_and_selected_make_uses_the_requested_id(server, monkeypatch):
     app, port = server
     status, _, body = req(port, "POST", "/api/ideas",
@@ -367,6 +368,7 @@ def test_setup_can_toggle_upload_without_echoing_secrets(server, tmp_path, monke
     assert app.settings.upload is False
     assert json.loads(req(port, "GET", "/api/automation")[2])["auto_publish"] is False
 
+
 def test_upload_requests_require_a_connected_youtube_account(server):
     app, port = server
     app.settings = app.settings.with_overrides(upload=True)
@@ -395,6 +397,7 @@ def test_automation_publish_requires_upload_and_oauth(server):
     assert state["auto_publish"] is True and state["auto_produce"] is True
     assert state["auto_approve_ideas"] is True
 
+
 def test_flush_uploads_worker_job_reports_completed_count(server, monkeypatch):
     from purffle_shorts.pipeline import Studio as PipelineStudio
     app, port = server
@@ -403,6 +406,7 @@ def test_flush_uploads_worker_job_reports_completed_count(server, monkeypatch):
     job = _job(port, jid)
     assert job["status"] == "done", job
     assert job["result"]["uploaded"] == 3
+
 
 def test_new_settings_default_to_local_render_only():
     from purffle_shorts.config import Settings
