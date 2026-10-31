@@ -1037,6 +1037,7 @@ async function viewAutomation(){
  <div class="check"><span>Last research run</span><b>${esc(a.last_run||"Never")} · ${esc(a.last_status)} · ${esc(a.last_message||"")}</b></div>
  <div class="check"><span>Last production run</span><b>${esc(a.last_production_run||"Never")} · ${esc(a.last_production_status)} · ${a.last_production_attempts||0}/2 attempts · ${esc(a.last_production_message||"")}</b></div>
  <div class="check"><span>Queued upload retry</span><b>${esc(a.last_upload_flush||"Never")} · ${esc(a.last_upload_flush_message||"Not scheduled")}</b></div>
+ <div class="check"><span>Last analytics sync</span><b>${esc(a.last_stats_sync||"Never")} · ${esc(a.last_stats_status||"idle")} · ${esc(a.last_stats_message||"Not scheduled")}</b></div>
  </section>
  <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Live production queue</h2><button class="btn sm" id="auto-refresh">Refresh</button></header>${active.length?active.map(x=>`<div class="check"><b>#${x.id} · ${esc(x.label)}</b><span>${esc(x.stage)} · ${x.pct}% · ${esc(x.status)}</span></div>`).join(""):empty("IDLE","No active jobs","Create or plan a job in Studio.")}</section>
  <section class="card"><header class="sheet-h"><span class="n">03</span><h2>Safety gates</h2></header><div class="checks">
