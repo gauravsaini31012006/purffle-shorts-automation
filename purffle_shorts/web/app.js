@@ -63,7 +63,7 @@ const MULTI = new Set(["dialogue", "chat"]);
 const STAGES = [["topic", "Topic"], ["script", "Script"], ["review", "Review"], ["voice", "Voice"], ["footage", "Footage"],
   ["captions", "Captions"], ["render", "Render"], ["check", "Check"], ["upload", "Upload"]];
 const STATUS_CHIP = { uploaded: "ok", scheduled: "blue", rendered: "accent", queued: "", failed: "bad" };
-const VIEW_NO = { create: "01", library: "02", queue: "03", ideas: "04", clip: "05", channel: "06", system: "07" };
+const VIEW_NO = { create: "01", library: "02", queue: "03", ideas: "04", clip: "05", channel: "06", system: "07", profiles: "08", automation: "09" };
 // The page heading: a numbered eyebrow, the title and one line of what the page is for.
 function head(view, title, text, aside = "") {
   return `<div class="page-head"><div><p class="eyebrow"><b>${VIEW_NO[view] || "00"}</b>Studio</p><h1>${title}</h1>${text ? `<p>${text}</p>` : ""}</div>${aside}</div>`;
@@ -193,7 +193,7 @@ function status() {
   ib.textContent = i.ideas;
 }
 
-const VIEWS = { create: viewCreate, library: viewLibrary, queue: viewQueue, ideas: viewIdeas, clip: viewClip, channel: viewChannel, system: viewSystem };
+const VIEWS = { create: viewCreate, library: viewLibrary, queue: viewQueue, ideas: viewIdeas, clip: viewClip, channel: viewChannel, system: viewSystem, profiles: viewProfiles, automation: viewAutomation };
 function route() {
   const v = (location.hash || "#create").slice(1).split("/")[0];
   S.view = VIEWS[v] ? v : "create";
@@ -949,6 +949,38 @@ async function viewChannel() {
 }
 
 // ------------------------------------------------------------------ SYSTEM
+async function viewProfiles() {
+  const main=$("#main");
+  main.innerHTML=`${head("profiles","Content profiles","Save reusable niche and production settings in your local Studio database.")}<section class="card"><div id="profile-list">Loading…</div></section>
+  <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Edit profile</h2></header><form id="profile-form" class="form-grid">
+  <label>Profile name<input name="name" maxlength="48" required></label><label>Niche<input name="niche" maxlength="240" required></label>
+  <label>Format<select name="style">${(S.options.styles||[]).map(x=>`<option>${esc(x)}</option>`).join("")}</select></label>
+  <label>Language<input name="language" value="en" maxlength="8" required></label>
+  <label>Duration<input name="duration" type="number" min="10" max="170" value="40"></label>
+  <label>Aspect<select name="aspect">${(S.options.aspects||["9:16"]).map(x=>`<option>${esc(x)}</option>`).join("")}</select></label>
+  <label class="wide">Visual direction<textarea name="visual_style" rows="2" maxlength="500"></textarea></label>
+  <div class="actions wide"><button class="btn primary" type="submit">Save & activate</button></div></form></section>`;
+  async function refresh(){const d=await get("/api/profiles"), rows=Object.values(d.profiles||{}), el=$("#profile-list");
+    el.innerHTML=rows.length?rows.map(p=>`<div class="check"><b>${esc(p.name)}</b><span>${esc(p.niche)} · ${esc(p.style)} · ${esc(p.language)} · ${p.duration}s</span><span class="actions"><button class="btn sm" data-use="${esc(p.name)}">Activate</button><button class="btn sm" data-edit="${esc(p.name)}">Edit</button><button class="btn sm danger" data-del="${esc(p.name)}">Delete</button></span></div>`).join(""):empty("NO PROFILES","No profiles saved","Create one below.");
+    el.querySelectorAll("[data-use]").forEach(b=>b.onclick=async()=>{try{await post("/api/profiles/apply",{name:b.dataset.use});toast("Profile activated.","ok")}catch(e){toast(esc(e.message),"bad")}});
+    el.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{const p=d.profiles[b.dataset.edit],form=$("#profile-form");Object.keys(p).forEach(k=>{if(form.elements[k])form.elements[k].value=p[k]})});
+    el.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{if(!confirm("Delete profile?"))return;try{await post("/api/profiles/delete",{name:b.dataset.del});refresh()}catch(e){toast(esc(e.message),"bad")}});
+  }
+  $("#profile-form").onsubmit=async e=>{e.preventDefault();try{await post("/api/profiles/save",Object.fromEntries(new FormData(e.currentTarget).entries()));toast("Saved and activated.","ok");refresh()}catch(err){toast(esc(err.message),"bad")}};
+  await refresh();
+}
+
+async function viewAutomation(){
+ const main=$("#main"),[i,j]=await Promise.all([get("/api/info"),get("/api/jobs")]);if(S.view!=="automation")return;
+ const active=j.filter(x=>["queued","running"].includes(x.status));
+ main.innerHTML=`${head("automation","Automation","Current production status and autopilot readiness.")}<div class="kpis"><div class="kpi"><small>Queue state</small><b>${active.length?"Active":"Idle"}</b></div><div class="kpi"><small>Active jobs</small><b>${active.length}</b></div><div class="kpi"><small>Ideas waiting</small><b>${i.ideas}</b></div><div class="kpi"><small>Publishing</small><b>${i.upload?"Configured":"Disabled"}</b></div></div>
+ <section class="card"><header class="sheet-h"><span class="n">01</span><h2>Live production queue</h2><button class="btn sm" id="auto-refresh">Refresh</button></header>${active.length?active.map(x=>`<div class="check"><b>#${x.id} · ${esc(x.label)}</b><span>${esc(x.stage)} · ${x.pct}% · ${esc(x.status)}</span></div>`).join(""):empty("IDLE","No active jobs","Create or plan a job in Studio.")}</section>
+ <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Automation readiness</h2></header><div class="checks">
+ <div class="check"><span>Research & ideas</span><span>Manual planning available</span></div><div class="check"><span>Generation & rendering</span><span>Studio job queue available</span></div><div class="check"><span>Editorial approval</span><span>Manual review</span></div><div class="check"><span>Unattended scheduler</span><span>Not enabled yet</span></div><div class="check"><span>Public uploads</span><span>${i.upload?"Configured — verify before enabling":"Disabled"}</span></div></div>
+ <p class="hint">This view reports existing capabilities honestly. A persistent scheduler, approval gate, retry policy and public-only rolling quota must be implemented and tested before unattended autopilot is switched on.</p></section>`;
+ $("#auto-refresh").onclick=viewAutomation;
+}
+
 async function viewSystem() {
   const main = $("#main");
   main.innerHTML = `${head("system", "System", "Setup checks, settings and ways to drive PurffleShorts from other tools.")}<div id="sys">${empty("RUNNING CHECKS", "Checking your setup…", "")}</div>`;
