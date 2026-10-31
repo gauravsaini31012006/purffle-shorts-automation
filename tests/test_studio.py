@@ -245,7 +245,7 @@ def test_automation_settings_are_persistent_and_validated(server):
 def test_rolling_upload_limit_counts_public_and_unknown_visibility(server):
     app, _ = server
     h = app.studio.history
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
     recent = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
     h.add_video(title="Public", status="uploaded", youtube_id="pub1", uploaded_at=recent,
                 youtube_privacy="public")
@@ -408,6 +408,8 @@ def test_new_settings_default_to_local_render_only():
     from purffle_shorts.config import Settings
     assert Settings().upload is False
     assert Settings().max_uploads_24h == 2
+
+
 def test_scheduler_recovers_claimed_idea_after_restart(server, monkeypatch):
     app, _ = server
     from datetime import datetime
@@ -439,6 +441,7 @@ def test_scheduler_recovers_claimed_idea_after_restart(server, monkeypatch):
     assert queued[0][1]["idea_id"] == idea_id
     recovered = app.studio.history.get_idea(idea_id)
     assert recovered["status"] == "pending" and recovered["approved"] == 1
+
 
 def test_scheduler_retries_failed_production_after_cooldown(server, monkeypatch):
     from datetime import datetime, timedelta
@@ -483,6 +486,7 @@ def test_scheduler_retries_failed_production_after_cooldown(server, monkeypatch)
     assert state["last_production_attempts"] == 1
     assert state["last_production_retry_at"] is None
 
+
 def test_scheduler_does_not_retry_after_two_failed_attempts(server, monkeypatch):
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
@@ -515,6 +519,7 @@ def test_scheduler_does_not_retry_after_two_failed_attempts(server, monkeypatch)
 
     assert not any(args and args[0] == "make_idea" for args, _ in queued)
     assert app.studio.history.get_idea(idea_id)["status"] == "pending"
+
 
 def test_scheduler_recovers_interrupted_upload_flush_after_restart(server, monkeypatch, tmp_path):
     from datetime import datetime
