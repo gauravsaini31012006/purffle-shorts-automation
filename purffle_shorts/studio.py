@@ -637,6 +637,14 @@ class StudioServer:
         from .pipeline import Studio
         self.settings = fresh
         self.studio = Studio(fresh)
+        # If the active profile exists, keep its provider/model in sync with Setup edits.
+        active = self.profiles()["active"]
+        profile_state = self.profiles()
+        if active in profile_state["profiles"] and ({"LLM_PROVIDER", "LLM_MODEL"} & set(updates)):
+            profile_state["profiles"][active]["provider"] = fresh.llm_provider
+            profile_state["profiles"][active]["model"] = fresh.llm_model
+            self.studio.history.set_meta("studio_profiles",
+                json.dumps(profile_state["profiles"], ensure_ascii=False))
         self.changed()
         return self.setup_state()
 
