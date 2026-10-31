@@ -151,6 +151,8 @@ class StudioServer:
                 "last_production_idea_id": state.get("last_production_idea_id"),
                 "last_production_status": state.get("last_production_status") or "idle",
                 "last_production_message": state.get("last_production_message") or "",
+                "last_production_attempts": max(0, min(2, int(state.get("last_production_attempts") or 0))),
+                "last_production_retry_at": state.get("last_production_retry_at"),
                 "last_upload_flush": state.get("last_upload_flush"),
                 "last_upload_flush_message": state.get("last_upload_flush_message") or "",
                 "mode": "review_required" if not state.get("auto_approve_ideas") else "auto_approval_enabled"}
@@ -239,7 +241,18 @@ class StudioServer:
                 # A queued approved idea is re-enqueued if Studio restarted before it completed.
                 if state["auto_produce"]:
                     last_idea_id = int(state.get("last_production_idea_id") or 0)
-                    recovering = (state["last_production_status"] == "queued" and last_idea_id > 0)
+                    attempts = int(state.get("last_production_attempts") or 0)
+                    retry_at = state.get("last_production_retry_at")
+                    retry_due = False
+                    if (state["last_production_status"] == "failed" and last_idea_id > 0 and attempts < 2
+                            and retry_at):
+                        try:
+                            retry_due = datetime.fromisoformat(str(retry_at)) <= now
+                        except ValueError:
+                            retry_due = False
+                    recovering = (last_idea_id > 0 and (
+                        state["last_production_status"] == "queued" or retry_due
+                    ))
                     eligible_today = state.get("last_production_run") != today or recovering
                     if eligible_today:
                         with self._lock:
@@ -431,13 +444,31 @@ class StudioServer:
                         # The scheduler independently polls for approved ideas, so approvals made
                         # after research still enter today's production run.
                     elif job.kind == "make_idea":
-                        from datetime import datetime
+                        from datetime import datetime, timedelta
                         from zoneinfo import ZoneInfo
-                        state["last_production_run"] = datetime.now(ZoneInfo(state["timezone"])).date().isoformat()
+                        finished_at = datetime.now(ZoneInfo(state["timezone"]))
+                        state["last_production_run"] = finished_at.date().isoformat()
                         state["last_production_status"] = job.status
-                        state["last_production_message"] = detail or (
-                            f"Production finished: {job.result.get('title', 'video')}" if job.status == "done"
-                            else "Production failed")
+                        if job.status == "failed":
+                            attempts = int(state.get("last_production_attempts") or 0) + 1
+                            state["last_production_attempts"] = min(2, attempts)
+                            if attempts < 2:
+                                retry_at = finished_at + timedelta(minutes=15)
+                                state["last_production_retry_at"] = retry_at.isoformat(timespec="seconds")
+                                retry_note = f" · retry 2/2 after {retry_at.strftime('%H:%M %Z')}"
+                            else:
+                                state["last_production_retry_at"] = None
+                                retry_note = " · automatic retry limit reached"
+                            state["last_production_message"] = (detail or "Production failed") + retry_note
+                        elif job.status == "done":
+                            state["last_production_attempts"] = 0
+                            state["last_production_retry_at"] = None
+                            state["last_production_message"] = detail or (
+                                f"Production finished: {job.result.get('title', 'video')}"
+                            )
+                        else:
+                            state["last_production_retry_at"] = None
+                            state["last_production_message"] = detail or "Production cancelled"
                         if state["auto_sync_stats"] and Path(self.settings.token_file).expanduser().exists():
                             schedule_stats = True
                     elif job.kind == "flush_uploads":
