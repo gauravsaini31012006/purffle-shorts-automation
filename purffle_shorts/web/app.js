@@ -63,7 +63,7 @@ const MULTI = new Set(["dialogue", "chat"]);
 const STAGES = [["topic", "Topic"], ["script", "Script"], ["review", "Review"], ["voice", "Voice"], ["footage", "Footage"],
   ["captions", "Captions"], ["render", "Render"], ["check", "Check"], ["upload", "Upload"]];
 const STATUS_CHIP = { uploaded: "ok", scheduled: "blue", rendered: "accent", queued: "", failed: "bad" };
-const VIEW_NO = { create: "01", library: "02", queue: "03", ideas: "04", clip: "05", channel: "06", system: "07", profiles: "08", automation: "09" };
+const VIEW_NO = { create: "01", library: "02", queue: "03", ideas: "04", clip: "05", channel: "06", system: "07", profiles: "08", automation: "09", tracking: "10" };
 // The page heading: a numbered eyebrow, the title and one line of what the page is for.
 function head(view, title, text, aside = "") {
   return `<div class="page-head"><div><p class="eyebrow"><b>${VIEW_NO[view] || "00"}</b>Studio</p><h1>${title}</h1>${text ? `<p>${text}</p>` : ""}</div>${aside}</div>`;
@@ -193,7 +193,7 @@ function status() {
   ib.textContent = i.ideas;
 }
 
-const VIEWS = { create: viewCreate, library: viewLibrary, queue: viewQueue, ideas: viewIdeas, clip: viewClip, channel: viewChannel, system: viewSystem, profiles: viewProfiles, automation: viewAutomation };
+const VIEWS = { create: viewCreate, library: viewLibrary, queue: viewQueue, ideas: viewIdeas, clip: viewClip, channel: viewChannel, system: viewSystem, profiles: viewProfiles, automation: viewAutomation, tracking: viewTracking };
 function route() {
   const v = (location.hash || "#create").slice(1).split("/")[0];
   S.view = VIEWS[v] ? v : "create";
@@ -949,7 +949,7 @@ async function viewChannel() {
 }
 
 // ------------------------------------------------------------------ SYSTEM
-async function viewProfiles() {
+async function viewTracking(){\n const main=$("#main"),[videos,jobs]=await Promise.all([get("/api/videos"),get("/api/jobs")]);if(S.view!=="tracking")return;\n const total=videos.length,failed=videos.filter(v=>v.status==="failed").length,ready=videos.filter(v=>["rendered","queued"].includes(v.status)).length,live=videos.filter(v=>["uploaded","scheduled"].includes(v.status)).length;\n const rows=videos.map(v=>"<tr><td><a href=\"#library\" data-open=\""+v.id+"\">"+esc(v.title||"Untitled")+"</a></td><td>"+esc(v.status)+"</td><td>"+esc(v.style||"—")+"</td><td>"+esc(ago(v.created))+"</td><td>"+(v.views==null?"—":fmtNum(v.views))+"</td><td>"+(v.likes==null?"—":fmtNum(v.likes))+"</td></tr>").join("");\n main.innerHTML=head("tracking","Production tracking","Follow every video from creation through publishing and performance sync.")+"<div class=\"kpis\"><div class=\"kpi\"><small>Tracked videos</small><b>"+total+"</b></div><div class=\"kpi\"><small>Ready / queued</small><b>"+ready+"</b></div><div class=\"kpi\"><small>Uploaded / scheduled</small><b>"+live+"</b></div><div class=\"kpi\"><small>Failed</small><b>"+failed+"</b></div></div><section class=\"card\"><header class=\"sheet-h\"><span class=\"n\">01</span><h2>Video lifecycle</h2><button class=\"btn sm\" id=\"track-refresh\">Refresh</button></header>"+(videos.length?"<table><thead><tr><th>Video</th><th>State</th><th>Format</th><th>Created</th><th>Views</th><th>Likes</th></tr></thead><tbody>"+rows+"</tbody></table>":empty("NO VIDEOS","Nothing to track yet","Rendered videos will appear here."))+"</section><section class=\"card\"><header class=\"sheet-h\"><span class=\"n\">02</span><h2>Recent job activity</h2></header>"+jobs.slice(0,12).map(j=>"<div class=\"check\"><b>#"+j.id+" · "+esc(j.label)+"</b><span>"+esc(j.kind)+" · "+esc(j.status)+" · "+j.pct+"%</span></div>").join("")+"</section>";\n $("#track-refresh").onclick=viewTracking;\n}\nasync function viewProfiles() {
   const main=$("#main");
   main.innerHTML=`${head("profiles","Content profiles","Save reusable niche and production settings in your local Studio database.")}<section class="card"><div id="profile-list">Loading…</div></section>
   <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Edit profile</h2></header><form id="profile-form" class="form-grid">
