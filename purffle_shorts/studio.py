@@ -110,6 +110,7 @@ class StudioServer:
         logging.getLogger().addHandler(_JobLog(self))
         threading.Thread(target=self._worker, name="studio-worker", daemon=True).start()
         self._scheduler_stop = threading.Event()
+        self._youtube_auth_thread = None
         threading.Thread(target=self._scheduler_loop, name="studio-scheduler", daemon=True).start()
 
     def automation_state(self) -> dict:
@@ -539,10 +540,29 @@ class StudioServer:
             "elevenlabs_key_set": bool(s.elevenlabs_api_key),
             "youtube_client_file": Path(s.client_secrets).exists(),
             "youtube_connected": token.exists(),
+            "youtube_auth_status": self.studio.history.get_meta("youtube_auth_status") or "not_started",
             "upload_enabled": bool(s.upload),
             "privacy": s.privacy,
             "profile_count": len(self.profiles()["profiles"]),
         }
+
+    def connect_youtube(self) -> dict:
+        """Start the official local OAuth consent flow without blocking the Studio request."""
+        if self._youtube_auth_thread and self._youtube_auth_thread.is_alive():
+            return {"status": "authorizing"}
+        self.studio.history.set_meta("youtube_auth_status", "authorizing")
+        def run():
+            try:
+                from . import youtube
+                youtube.get_credentials(self.settings, interactive=True, extra_scopes=youtube.auth_scopes(self.settings))
+                self.studio.history.set_meta("youtube_auth_status", "connected")
+            except Exception as exc:
+                self.studio.history.set_meta("youtube_auth_status", "failed: " + str(exc)[:300])
+                log.warning("YouTube authorization failed: %s", exc)
+            self.changed()
+        self._youtube_auth_thread = threading.Thread(target=run, name="youtube-oauth", daemon=True)
+        self._youtube_auth_thread.start()
+        return {"status": "authorizing"}
 
     def save_setup(self, payload: dict) -> dict:
         """Save user-supplied provider credentials locally, reload settings, and never echo secrets."""
@@ -870,6 +890,8 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                     return self._json(app.save_setup(body))
                 except ValueError as e:
                     return self._json({"error": str(e)}, 400)
+            if path == "/api/youtube/connect":
+                return self._json(app.connect_youtube())
             if path == "/api/profiles/save":
                 try:
                     return self._json(app.save_profile(body))
