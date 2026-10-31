@@ -337,6 +337,8 @@ class StudioServer:
                 CANCEL.clear()
                 if job.params.get("scheduled"):
                     state = self.automation_state()
+                    scheduled_followup = None
+                    schedule_stats = False
                     detail = (job.result.get("error") if isinstance(job.result, dict) else "") or job.message or job.status
                     if job.kind == "plan":
                         state["last_status"] = job.status
@@ -350,9 +352,8 @@ class StudioServer:
                             if candidate:
                                 publish = bool(state["auto_publish"] and self.settings.upload
                                                and Path(self.settings.token_file).expanduser().exists())
-                                self.submit("make_idea", {"idea_id": candidate["id"], "upload": publish,
-                                                          "scheduled": True},
-                                            "Scheduled daily Short")
+                                scheduled_followup = ("make_idea", {"idea_id": candidate["id"], "upload": publish,
+                                                                             "scheduled": True}, "Scheduled daily Short")
                                 state["last_production_status"] = "queued"
                                 state["last_production_message"] = "Approved idea queued for production"
                             else:
@@ -365,10 +366,16 @@ class StudioServer:
                             f"Production finished: {job.result.get('title', 'video')}" if job.status == "done"
                             else "Production failed")
                         if state["auto_sync_stats"] and self.settings.upload:
-                            self.submit("stats", {"scheduled": True}, "Scheduled channel analytics sync")
+                            schedule_stats = True
                     elif job.kind == "stats":
                         state["last_production_message"] = "Channel analytics refreshed" if job.status == "done" else detail
                     self.studio.history.set_meta("studio_automation", json.dumps(state))
+                    # Store state before queueing follow-ups so a very fast worker cannot be overwritten
+                    # by the parent job's stale state snapshot.
+                    if scheduled_followup:
+                        self.submit(*scheduled_followup)
+                    if schedule_stats:
+                        self.submit("stats", {"scheduled": True}, "Scheduled channel analytics sync")
                     from . import notify
                     notify.send(self.settings, "failed" if job.status != "done" else "rendered",
                                 title=job.label or "Scheduled automation", detail=state["last_message"] if job.kind == "plan"
