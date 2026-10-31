@@ -134,7 +134,7 @@ class StudioServer:
             state["enabled"] = bool(payload["enabled"])
         if "plan_time" in payload:
             value = str(payload["plan_time"])
-            if not re.fullmatch(r"(?:[01]\\d|2[0-3]):[0-5]\\d", value):
+            if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
                 raise ValueError("Plan time must be HH:MM (24-hour time)")
             state["plan_time"] = value
         if "timezone" in payload:
