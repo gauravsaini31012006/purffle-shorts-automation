@@ -150,6 +150,8 @@ class StudioServer:
                 "last_production_run": state.get("last_production_run"),
                 "last_production_status": state.get("last_production_status") or "idle",
                 "last_production_message": state.get("last_production_message") or "",
+                "last_upload_flush": state.get("last_upload_flush"),
+                "last_upload_flush_message": state.get("last_upload_flush_message") or "",
                 "mode": "review_required" if not state.get("auto_approve_ideas") else "auto_approval_enabled"}
 
     def update_automation(self, payload: dict) -> dict:
@@ -211,6 +213,16 @@ class StudioServer:
                     self.submit("plan", {"count": state["ideas_per_run"], "niche": niche, "scheduled": True,
                                          "auto_approve": state["auto_approve_ideas"]},
                                 "Scheduled daily idea research")
+
+                # Retry previously rendered videos before creating today's new upload. This runs
+                # only when automatic publishing is enabled, preserving manual-only queues otherwise.
+                if (state["auto_publish"] and self.settings.upload
+                        and Path(self.settings.token_file).expanduser().exists()
+                        and state.get("last_upload_flush") != today):
+                    state["last_upload_flush"] = today
+                    state["last_upload_flush_message"] = "Queued uploads retry scheduled"
+                    self.studio.history.set_meta("studio_automation", json.dumps(state))
+                    self.submit("flush_uploads", {"scheduled": True}, "Retry queued YouTube uploads")
 
                 # Production is checked independently of research completion. This means an idea
                 # approved later in the day can still be rendered without waiting for tomorrow.
@@ -346,6 +358,12 @@ class StudioServer:
                     status = self.studio.upload_record(int(p["id"]))
                     job.result = {"status": status, "id": int(p["id"])}
                     ok = status in ("uploaded", "scheduled", "queued")
+                elif job.kind == "flush_uploads":
+                    from .pipeline import Studio
+                    worker_studio = Studio(self.settings)
+                    count = worker_studio.flush_queue()
+                    job.result = {"uploaded": count}
+                    ok = True
                 elif job.kind == "stats":
                     from .analytics import sync_stats
                     job.result = {"updated": sync_stats(self.settings, self.studio.history)}
@@ -387,6 +405,11 @@ class StudioServer:
                             else "Production failed")
                         if state["auto_sync_stats"] and Path(self.settings.token_file).expanduser().exists():
                             schedule_stats = True
+                    elif job.kind == "flush_uploads":
+                        count = job.result.get("uploaded", 0) if isinstance(job.result, dict) else 0
+                        state["last_upload_flush_message"] = (
+                            f"Uploaded {count} queued video(s)" if job.status == "done" else detail
+                        )
                     elif job.kind == "stats":
                         state["last_production_message"] = "Channel analytics refreshed" if job.status == "done" else detail
                     self.studio.history.set_meta("studio_automation", json.dumps(state))
