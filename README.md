@@ -672,7 +672,13 @@ The Setup page accepts an LLM key, optional Pexels/Pixabay/ElevenLabs keys, and 
 
 For YouTube, create a **Desktop app** OAuth client in Google Cloud Console, enable YouTube Data API v3, paste its downloaded JSON into Setup, save, then choose **Connect YouTube account** and complete Google's consent screen in the browser. Reconnect after changing OAuth scopes or switching Google accounts. Each saved creator profile receives its own local YouTube token file, so activating another profile can use a different Google account/channel. Reconnect that profile to switch the account it uses.
 
-**Security:** this is a local single-user Studio, not a hosted multi-tenant SaaS. Do not expose it to the public internet or share its `.env`, OAuth client JSON or token files. Use a strong `STUDIO_PASSWORD` if binding beyond localhost. Credentials are stored on the machine running Studio, not encrypted by a cloud vault. YouTube publishing remains off unless explicitly enabled in local configuration; connecting an account does not publish anything.
+### Controlled daily automation
+
+The **Automation** page can schedule daily idea research. New ideas wait in **Ideas → Needs review** by default; approve an idea before rendering it. You can explicitly enable automatic approval of researched ideas and automatic rendering of one approved idea per day. Analytics sync can also be scheduled after production when a YouTube account is connected.
+
+Publishing has two separate gates: turn on **Enable YouTube publishing** in Setup, then enable **Automatically publish finished videos** in Automation. Both are off by default. Automatic publishing also requires a connected YouTube account and is still subject to the configured daily quota and the rolling 24-hour public-upload cap. Leaving auto-approval off preserves a human editorial checkpoint; leaving auto-publish off creates local videos without making them public.
+
+**Security:** this is a local single-user Studio, not a hosted multi-tenant SaaS. Do not expose it to the public internet or share its `.env`, OAuth client JSON or token files. Use a strong `STUDIO_PASSWORD` if binding beyond localhost. Credentials are stored on the machine running Studio, not encrypted by a cloud vault. YouTube publishing is off by default; connecting an account does not publish anything.
 
 ---
 
