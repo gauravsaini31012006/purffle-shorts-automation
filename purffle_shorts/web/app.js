@@ -976,12 +976,14 @@ async function viewSetup() {
   <label>Pexels API key<input name="pexels_api_key" type="password" autocomplete="new-password" placeholder="Optional free visuals"></label>
   <label>Pixabay API key<input name="pixabay_api_key" type="password" autocomplete="new-password" placeholder="Optional free visuals"></label>
   <label>ElevenLabs API key<input name="elevenlabs_api_key" type="password" autocomplete="new-password" placeholder="Optional voice"></label>
+  <input type="hidden" name="upload_enabled" value="false">
+  <label class="check wide"><span>Enable YouTube publishing <small>Keep disabled until you have connected and verified the correct channel.</small></span><input name="upload_enabled" type="checkbox" value="true" ${d.upload_enabled?"checked":""}></label>
   <label class="wide">Google OAuth Desktop client JSON<textarea name="youtube_client_json" rows="5" placeholder="Paste the contents of your Google OAuth Desktop app credentials JSON. You can also place it at credentials.json yourself."></textarea></label>
   <div class="actions wide"><button class="btn primary" type="submit">Save credentials securely on this computer</button><button class="btn" type="button" id="youtube-connect" ${d.youtube_client_file?"":"disabled"}>Connect YouTube account</button><button class="btn" type="button" id="setup-refresh">Refresh connection status</button></div>
-  </form><p class="hint">Secrets are saved only in this local installation's .env file and are never returned to the dashboard. Google OAuth tokens are stored locally. Keep this computer private; do not share .env, credentials.json or token.json. YouTube publishing stays disabled until you explicitly enable it in your local configuration.</p>
+  </form><p class="hint">Secrets are saved only in this local installation's .env file and are never returned to the dashboard. Google OAuth tokens are stored locally. Keep this computer private; do not share .env, credentials.json or token.json. YouTube publishing is off by default. Turn it on here only after verifying the connected Google account and channel.</p>
   <div class="check"><span>YouTube authentication</span><b>${esc(d.youtube_auth_status||"not_started")}</b></div>
   </section>`;
-  $("#setup-form").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f.entries());try{const result=await post("/api/setup",body);toast("Credentials saved. Secret values are not displayed again.","ok");viewSetup()}catch(err){toast(esc(err.message),"bad")}};
+  $("#setup-form").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f.entries());try{const result=await post("/api/setup",body);toast("Settings saved. Secret values are not displayed again.","ok");viewSetup()}catch(err){toast(esc(err.message),"bad")}};
   $("#youtube-connect").onclick=async()=>{try{await post("/api/youtube/connect",{});toast("Google sign-in started. Complete consent in the browser window, then refresh status.","ok");}catch(err){toast(esc(err.message),"bad")}};
   $("#setup-refresh").onclick=viewSetup;
 }
