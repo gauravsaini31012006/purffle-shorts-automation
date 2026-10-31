@@ -969,7 +969,7 @@ async function viewSetup() {
   <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Connect your services</h2></header>
   <div class="checks">${state(d.llm_key_set,"LLM API credential")}${state(d.pexels_key_set,"Pexels visuals")}${state(d.pixabay_key_set,"Pixabay visuals")}${state(d.elevenlabs_key_set,"ElevenLabs voice")}${state(d.youtube_client_file,"Google OAuth client file")}${state(d.youtube_connected,"YouTube account")}</div>
   <form id="setup-form" class="form-grid">
-  <label>LLM provider<input name="llm_provider" value="${esc(d.llm_provider||"auto")}" placeholder="openai, gemini, anthropic, ollama"></label>
+  <label>LLM provider<select name="llm_provider">${(S.options.providers||[]).map(x=>`<option value="${esc(x.name)}" ${x.name===(d.llm_provider||"auto")?"selected":""}>${esc(x.label||x.name)}</option>`).join("")}<option value="auto" ${(d.llm_provider||"auto")==="auto"?"selected":""}>Automatic</option></select></label>
   <label>Model<input name="llm_model" value="${esc(d.llm_model||"")}" placeholder="e.g. gemini-2.5-flash"></label>
   <label class="wide">LLM API key<input name="llm_api_key" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved key"></label>
   <label>OpenAI API key<input name="openai_api_key" type="password" autocomplete="new-password" placeholder="Optional"></label>
