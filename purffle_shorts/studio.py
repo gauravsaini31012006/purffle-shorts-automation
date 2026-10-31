@@ -722,6 +722,11 @@ class StudioServer:
                          if env_name in updates}
         if "UPLOAD" in updates:
             field_updates["upload"] = updates["UPLOAD"].lower() == "true"
+            if not field_updates["upload"]:
+                automation = self.automation_state()
+                if automation["auto_publish"]:
+                    automation["auto_publish"] = False
+                    self.studio.history.set_meta("studio_automation", json.dumps(automation))
         # Keep all current runtime choices; only replace the fields explicitly edited in Setup.
         fresh = self.settings.with_overrides(**field_updates)
         self.settings = fresh
