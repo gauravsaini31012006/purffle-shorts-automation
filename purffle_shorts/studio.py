@@ -660,6 +660,10 @@ class StudioServer:
             value = payload.get(field_name)
             if value is not None and str(value).strip():
                 updates[env_name] = str(value).strip()
+        if "upload_enabled" in payload:
+            value = payload.get("upload_enabled")
+            enabled = value if isinstance(value, bool) else str(value).strip().lower() in {"1", "true", "yes", "on"}
+            updates["UPLOAD"] = "true" if enabled else "false"
         client_json = str(payload.get("youtube_client_json") or "").strip()
         if client_json:
             try:
