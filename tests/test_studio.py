@@ -561,3 +561,17 @@ def test_scheduler_recovers_interrupted_upload_flush_after_restart(server, monke
 
     assert queued and queued[0][0] == "flush_uploads"
     assert queued[0][1]["scheduled"] is True
+
+
+def test_scheduled_stats_sync_has_its_own_status(server, monkeypatch):
+    from purffle_shorts import analytics
+
+    app, port = server
+    monkeypatch.setattr(analytics, "sync_stats", lambda _settings, _history: 4)
+    jid = app.submit("stats", {"scheduled": True}, "Scheduled analytics sync").id
+    job = _job(port, jid)
+    assert job["status"] == "done", job
+    state = app.automation_state()
+    assert state["last_stats_status"] == "done"
+    assert state["last_stats_message"] == "Updated 4 video(s)"
+    assert state["last_production_message"] == ""
