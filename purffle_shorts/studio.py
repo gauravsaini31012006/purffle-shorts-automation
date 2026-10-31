@@ -230,12 +230,26 @@ class StudioServer:
                 # Retry previously rendered videos before creating today's new upload. This runs
                 # only when automatic publishing is enabled, preserving manual-only queues otherwise.
                 if (state["auto_publish"] and self.settings.upload
-                        and Path(self.settings.token_file).expanduser().exists()
-                        and state.get("last_upload_flush") != today):
-                    state["last_upload_flush"] = today
-                    state["last_upload_flush_message"] = "Queued uploads retry scheduled"
-                    self.studio.history.set_meta("studio_automation", json.dumps(state))
-                    self.submit("flush_uploads", {"scheduled": True}, "Retry queued YouTube uploads")
+                        and Path(self.settings.token_file).expanduser().exists()):
+                    with self._lock:
+                        active_upload_flush = any(
+                            j.kind == "flush_uploads" and j.params.get("scheduled")
+                            and j.status in ("queued", "running") for j in self.jobs.values()
+                        )
+                    flush_due = state.get("last_upload_flush") != today
+                    flush_recovery = (
+                        state.get("last_upload_flush") == today
+                        and state.get("last_upload_flush_message") == "Queued uploads retry scheduled"
+                        and not active_upload_flush
+                    )
+                    if flush_due or flush_recovery:
+                        state["last_upload_flush"] = today
+                        state["last_upload_flush_message"] = (
+                            "Queued uploads retry scheduled" if flush_due
+                            else "Recovering interrupted queued-upload retry"
+                        )
+                        self.studio.history.set_meta("studio_automation", json.dumps(state))
+                        self.submit("flush_uploads", {"scheduled": True}, "Retry queued YouTube uploads")
 
                 # Production runs independently of research completion; late approvals still run today.
                 # A queued approved idea is re-enqueued if Studio restarted before it completed.
