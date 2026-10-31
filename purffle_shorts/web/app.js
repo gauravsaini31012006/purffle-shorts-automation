@@ -971,16 +971,27 @@ async function viewTracking(){\n const main=$("#main"),[videos,jobs]=await Promi
 }
 
 async function viewAutomation(){
- const main=$("#main"),[i,j]=await Promise.all([get("/api/info"),get("/api/jobs")]);if(S.view!=="automation")return;
+ const main=$("#main");
+ const [i,j,a]=await Promise.all([get("/api/info"),get("/api/jobs"),get("/api/automation")]);
+ if(S.view!=="automation")return;
  const active=j.filter(x=>["queued","running"].includes(x.status));
- main.innerHTML=`${head("automation","Automation","Current production status and autopilot readiness.")}<div class="kpis"><div class="kpi"><small>Queue state</small><b>${active.length?"Active":"Idle"}</b></div><div class="kpi"><small>Active jobs</small><b>${active.length}</b></div><div class="kpi"><small>Ideas waiting</small><b>${i.ideas}</b></div><div class="kpi"><small>Publishing</small><b>${i.upload?"Configured":"Disabled"}</b></div></div>
- <section class="card"><header class="sheet-h"><span class="n">01</span><h2>Live production queue</h2><button class="btn sm" id="auto-refresh">Refresh</button></header>${active.length?active.map(x=>`<div class="check"><b>#${x.id} · ${esc(x.label)}</b><span>${esc(x.stage)} · ${x.pct}% · ${esc(x.status)}</span></div>`).join(""):empty("IDLE","No active jobs","Create or plan a job in Studio.")}</section>
- <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Automation readiness</h2></header><div class="checks">
- <div class="check"><span>Research & ideas</span><span>Manual planning available</span></div><div class="check"><span>Generation & rendering</span><span>Studio job queue available</span></div><div class="check"><span>Editorial approval</span><span>Manual review</span></div><div class="check"><span>Unattended scheduler</span><span>Not enabled yet</span></div><div class="check"><span>Public uploads</span><span>${i.upload?"Configured — verify before enabling":"Disabled"}</span></div></div>
- <p class="hint">This view reports existing capabilities honestly. A persistent scheduler, approval gate, retry policy and public-only rolling quota must be implemented and tested before unattended autopilot is switched on.</p></section>`;
+ main.innerHTML=`${head("automation","Automation","Configure daily research and monitor the production pipeline.")}<div class="kpis"><div class="kpi"><small>Queue state</small><b>${active.length?"Active":"Idle"}</b></div><div class="kpi"><small>Active jobs</small><b>${active.length}</b></div><div class="kpi"><small>Ideas waiting</small><b>${i.ideas}</b></div><div class="kpi"><small>Publishing</small><b>${i.upload?"Enabled in config":"Disabled"}</b></div></div>
+ <section class="card"><header class="sheet-h"><span class="n">01</span><h2>Daily research scheduler</h2></header>
+ <form id="automation-form" class="form-grid">
+ <label class="check"><span>Enable daily research</span><input name="enabled" type="checkbox" ${a.enabled?"checked":""}></label>
+ <label>Run time (24-hour)<input name="plan_time" type="time" value="${esc(a.plan_time)}" required></label>
+ <label>Timezone (IANA)<input name="timezone" value="${esc(a.timezone)}" placeholder="Asia/Kolkata" required></label>
+ <label>Ideas per run<input name="ideas_per_run" type="number" min="1" max="30" value="${a.ideas_per_run}"></label>
+ <div class="form-actions"><button class="btn primary" type="submit">Save scheduler</button></div></form>
+ <p class="hint">This scheduler researches and adds ideas to your queue once per day. It does not render, approve, or publish videos automatically. Public uploads remain subject to manual action and the upload safety settings.</p>
+ <div class="check"><span>Last run</span><b>${esc(a.last_run||"Never")}</b></div><div class="check"><span>Last status</span><b>${esc(a.last_status)} · ${esc(a.last_message||"")}</b></div>
+ </section>
+ <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Live production queue</h2><button class="btn sm" id="auto-refresh">Refresh</button></header>${active.length?active.map(x=>`<div class="check"><b>#${x.id} · ${esc(x.label)}</b><span>${esc(x.stage)} · ${x.pct}% · ${esc(x.status)}</span></div>`).join(""):empty("IDLE","No active jobs","Create or plan a job in Studio.")}</section>
+ <section class="card"><header class="sheet-h"><span class="n">03</span><h2>Safety gates</h2></header><div class="checks">
+ <div class="check"><span>Daily idea research</span><b>Configurable</b></div><div class="check"><span>Video generation</span><b>Manual trigger</b></div><div class="check"><span>Editorial approval</span><b>Manual</b></div><div class="check"><span>YouTube publishing</span><b>Manual / disabled until connected</b></div></div></section>`;
  $("#auto-refresh").onclick=viewAutomation;
+ $("#automation-form").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{await post("/api/automation",{enabled:f.has("enabled"),plan_time:f.get("plan_time"),timezone:f.get("timezone"),ideas_per_run:Number(f.get("ideas_per_run"))});toast("Automation settings saved.","ok");viewAutomation()}catch(err){toast(esc(err.message),"bad")}};
 }
-
 async function viewSystem() {
   const main = $("#main");
   main.innerHTML = `${head("system", "System", "Setup checks, settings and ways to drive PurffleShorts from other tools.")}<div id="sys">${empty("RUNNING CHECKS", "Checking your setup…", "")}</div>`;
