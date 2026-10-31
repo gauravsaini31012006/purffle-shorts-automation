@@ -297,15 +297,18 @@ def test_setup_saves_credentials_without_returning_secret(server, tmp_path, monk
     app, port = server
     monkeypatch.chdir(tmp_path)
     secret = "test-secret-never-return-this"
+    telegram_token = "telegram-token-never-return-this"
     status, _, body = req(port, "POST", "/api/setup",
                           {"llm_provider": "gemini", "llm_model": "gemini-2.5-flash",
-                           "llm_api_key": secret}, app.token)
+                           "llm_api_key": secret, "telegram_bot_token": telegram_token,
+                           "telegram_chat_id": "123456789"}, app.token)
     assert status == 200, body
-    assert secret.encode() not in body
+    assert secret.encode() not in body and telegram_token.encode() not in body
     assert app.settings.llm_api_key == secret
-    assert "LLM_API_KEY=" in (tmp_path / ".env").read_text(encoding="utf-8")
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "LLM_API_KEY=" in env_text and "TELEGRAM_BOT_TOKEN=" in env_text
     state = json.loads(req(port, "GET", "/api/setup")[2])
-    assert state["llm_key_set"] is True
+    assert state["llm_key_set"] is True and state["telegram_configured"] is True
 
 def test_ideas_require_approval_and_selected_make_uses_the_requested_id(server, monkeypatch):
     app, port = server
