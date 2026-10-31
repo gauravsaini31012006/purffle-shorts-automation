@@ -207,14 +207,13 @@ class StudioServer:
                 # approved later in the day can still be rendered without waiting for tomorrow.
                 if state["auto_produce"] and state.get("last_production_run") != today:
                     with self._lock:
-                        active_production = any(
-                            j.kind == "make_idea" and j.params.get("scheduled")
-                            and j.status in ("queued", "running") for j in self.jobs.values()
-                        )
-                    if not active_production:
-                        candidate = next((idea for idea in self.studio.history.ideas("pending")
-                                          if idea.get("approved")), None)
-                        if candidate:
+                        active_idea_ids = {
+                            int(j.params.get("idea_id") or 0) for j in self.jobs.values()
+                            if j.kind == "make_idea" and j.status in ("queued", "running")
+                        }
+                    candidate = next((idea for idea in self.studio.history.ideas("pending")
+                                      if idea.get("approved") and idea["id"] not in active_idea_ids), None)
+                    if candidate:
                             publish = bool(state["auto_publish"] and self.settings.upload
                                            and Path(self.settings.token_file).expanduser().exists())
                             # Persist the date before enqueueing: no duplicate daily render after restart.
