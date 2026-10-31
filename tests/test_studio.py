@@ -296,6 +296,8 @@ def test_setup_status_never_exposes_secret_values(server):
 def test_setup_saves_credentials_without_returning_secret(server, tmp_path, monkeypatch):
     app, port = server
     monkeypatch.chdir(tmp_path)
+    for key in ("LLM_API_KEY", "LLM_PROVIDER", "LLM_MODEL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+        monkeypatch.setenv(key, "")
     secret = "test-secret-never-return-this"
     telegram_token = "telegram-token-never-return-this"
     status, _, body = req(port, "POST", "/api/setup",
@@ -351,6 +353,7 @@ def test_history_claims_only_approved_ideas_and_can_target_an_id(server):
 def test_setup_can_toggle_upload_without_echoing_secrets(server, tmp_path, monkeypatch):
     app, port = server
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("UPLOAD", "false")
     status, _, body = req(port, "POST", "/api/setup", {"upload_enabled": True}, app.token)
     assert status == 200, body
     assert app.settings.upload is True
