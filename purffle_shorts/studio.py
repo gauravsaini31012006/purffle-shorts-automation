@@ -415,8 +415,9 @@ class StudioServer:
         state = self.profiles()
         state["profiles"][name] = profile
         self.studio.history.set_meta("studio_profiles", json.dumps(state["profiles"], ensure_ascii=False))
-        self.studio.history.set_meta("studio_active_profile", name)
-        return {"profile": profile, "active": name}
+        # Saving from the profile editor also selects the profile immediately, so the
+        # next Create job uses the newly saved niche and production settings.
+        return self.apply_profile(name)
 
     def apply_profile(self, name: str) -> dict:
         state = self.profiles()
