@@ -415,13 +415,22 @@ class StudioServer:
             angle = (idea.get("notes") or "").strip()
             topic = f'{idea["subject"]} (angle: {angle})' if angle else idea["subject"]
             try:
-                r = studio.make(topic, upload=bool(p.get("upload")) and s.upload,
+                # Render first and link the idea before attempting any network upload. A YouTube
+                # authorization or quota problem must not cause a second copy of a finished Short.
+                r = studio.make(topic, upload=False,
                                 style=idea.get("style") or (s.style if s.style != "auto" else None))
             except Exception:
                 studio.history.release_idea(idea_id)
                 raise
             if r.ok and r.record_id:
                 studio.history.link_idea(idea_id, r.record_id)
+                if bool(p.get("upload")) and s.upload:
+                    try:
+                        studio.upload_record(r.record_id, r)
+                    except Exception as exc:
+                        r.status, r.error = "upload-failed", str(exc)[:500]
+                        from . import notify
+                        notify.send(s, "failed", title=r.title, detail=f"Video rendered; upload failed: {r.error}")
             else:
                 studio.history.release_idea(idea_id)
             job.result = _result(r)
