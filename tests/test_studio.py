@@ -512,3 +512,39 @@ def test_scheduler_does_not_retry_after_two_failed_attempts(server, monkeypatch)
 
     assert not any(args and args[0] == "make_idea" for args, _ in queued)
     assert app.studio.history.get_idea(idea_id)["status"] == "pending"
+
+def test_scheduler_recovers_interrupted_upload_flush_after_restart(server, monkeypatch, tmp_path):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    app, _ = server
+    token = tmp_path / "token.json"
+    token.write_text("test token", encoding="utf-8")
+    app.settings = app.settings.with_overrides(upload=True, token_file=str(token))
+    app.studio.s = app.settings
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    app.studio.history.set_meta("studio_automation", json.dumps({
+        "enabled": True, "plan_time": "00:00", "timezone": "Asia/Kolkata", "ideas_per_run": 5,
+        "auto_approve_ideas": False, "auto_produce": False, "auto_publish": True, "auto_sync_stats": False,
+        "last_run": today, "last_status": "done", "last_upload_flush": today,
+        "last_upload_flush_message": "Queued uploads retry scheduled",
+    }))
+
+    class OnePass:
+        calls = 0
+        def wait(self, _seconds):
+            self.calls += 1
+            return self.calls > 1
+
+    app._scheduler_stop = OnePass()
+    queued = []
+
+    class StubJob:
+        id = 789
+
+    monkeypatch.setattr(app, "submit", lambda kind, params, label="": (
+        queued.append((kind, params, label)) or StubJob()))
+    app._scheduler_loop()
+
+    assert queued and queued[0][0] == "flush_uploads"
+    assert queued[0][1]["scheduled"] is True
