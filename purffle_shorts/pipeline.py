@@ -683,7 +683,7 @@ class Studio:
         status = "scheduled" if publish else "uploaded"
         publish_iso = youtube.to_rfc3339(publish) if publish else None
         self.history.update_video(rid, status=status, youtube_id=vid, uploaded_at=now_iso(), publish_at=publish_iso,
-                                  error=None)
+                                  youtube_privacy=self.s.privacy, error=None)
         when = f", goes public {publish.strftime('%a %d %b %H:%M %Z')}" if publish else ""
         log.info("%s: https://youtube.com/shorts/%s%s", status.capitalize(), vid, when)
         notify.send(self.s, status, title=rec["title"], url=f"https://youtube.com/shorts/{vid}",
