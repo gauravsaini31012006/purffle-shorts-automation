@@ -664,6 +664,18 @@ Run `auth` once on your own computer so `token.json` exists in the mounted folde
 
 ---
 
+## First-run setup and creator profiles
+
+Open Studio and choose **Setup** to configure an installation. A creator can save a reusable profile with a niche, channel name, target audience, preferred LLM provider/model, language, format, duration, aspect ratio and visual direction. Profiles can be edited, activated or deleted later.
+
+The Setup page accepts an LLM key, optional Pexels/Pixabay/ElevenLabs keys, and a Google OAuth Desktop-client JSON. Secrets are stored locally in the installation's `.env` file (with restrictive file permissions where supported); OAuth client JSON and access tokens remain local files. The dashboard returns connection readiness only and never reads secret values back into the browser. Blank key fields leave existing credentials unchanged.
+
+For YouTube, create a **Desktop app** OAuth client in Google Cloud Console, enable YouTube Data API v3, paste its downloaded JSON into Setup, save, then choose **Connect YouTube account** and complete Google's consent screen in the browser. Reconnect after changing OAuth scopes or switching Google accounts. The Studio keeps the existing token file path; use a separate local Purffle installation/data directory if you need fully isolated channel tokens.
+
+**Security:** this is a local single-user Studio, not a hosted multi-tenant SaaS. Do not expose it to the public internet or share its `.env`, OAuth client JSON or token files. Use a strong `STUDIO_PASSWORD` if binding beyond localhost. Credentials are stored on the machine running Studio, not encrypted by a cloud vault. YouTube publishing remains off unless explicitly enabled in local configuration; connecting an account does not publish anything.
+
+---
+
 ## ❓ FAQ
 
 **Is PurffleShorts free?**<br>
