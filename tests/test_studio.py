@@ -228,6 +228,20 @@ def test_automation_settings_are_persistent_and_validated(server):
     assert status == 400 and b"HH:MM" in body
 
 
+def test_rolling_upload_limit_counts_public_and_unknown_visibility(server):
+    app, _ = server
+    h = app.studio.history
+    from datetime import datetime, timezone, timedelta
+    recent = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
+    h.add_video(title="Public", status="uploaded", youtube_id="pub1", uploaded_at=recent,
+                youtube_privacy="public")
+    h.add_video(title="Private", status="uploaded", youtube_id="priv1", uploaded_at=recent,
+                youtube_privacy="private")
+    h.add_video(title="Legacy", status="uploaded", youtube_id="legacy1", uploaded_at=recent)
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
+    assert h.youtube_uploads_last_24h(since) == 2
+
+
 def test_profile_api_persists_and_applies_settings(server):
     app, port = server
     assert req(port, "GET", "/api/profiles")[0] == 200
