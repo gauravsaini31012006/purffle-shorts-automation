@@ -184,6 +184,10 @@ class History:
             cur = c.execute("UPDATE ideas SET approved = 1 WHERE id = ? AND status = 'pending'", (idea_id,))
             return cur.rowcount > 0
 
+    def get_idea(self, idea_id: int) -> dict | None:
+        rows = self._all("SELECT * FROM ideas WHERE id = ?", (idea_id,))
+        return rows[0] if rows else None
+
     def ideas(self, status: str | None = "pending", limit: int = 200) -> list[dict]:
         if status:
             return self._all("SELECT * FROM ideas WHERE status = ? ORDER BY id LIMIT ?", (status, limit))
