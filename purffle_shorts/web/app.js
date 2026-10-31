@@ -967,7 +967,7 @@ async function viewSetup() {
   <p class="hint">Start by creating a named creator profile under Profiles. Each profile can keep its own niche, channel identity, LLM provider/model and production preferences.</p>
   <div class="actions"><a class="btn primary" href="#profiles">Create creator profile</a></div></section>
   <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Connect your services</h2></header>
-  <div class="checks">${state(d.llm_key_set,"LLM API credential")}${state(d.pexels_key_set,"Pexels visuals")}${state(d.pixabay_key_set,"Pixabay visuals")}${state(d.elevenlabs_key_set,"ElevenLabs voice")}${state(d.youtube_client_file,"Google OAuth client file")}${state(d.youtube_connected,"YouTube account")}</div>
+  <div class="checks">${state(d.llm_key_set,"LLM API credential")}${state(d.pexels_key_set,"Pexels visuals")}${state(d.pixabay_key_set,"Pixabay visuals")}${state(d.elevenlabs_key_set,"ElevenLabs voice")}${state(d.youtube_client_file,"Google OAuth client file")}${state(d.youtube_connected,"YouTube account")}${state(d.telegram_configured,"Telegram notifications")}</div>
   <form id="setup-form" class="form-grid">
   <label>LLM provider<select name="llm_provider">${(S.options.providers||[]).map(x=>`<option value="${esc(x.name)}" ${x.name===(d.llm_provider||"auto")?"selected":""}>${esc(x.label||x.name)}</option>`).join("")}<option value="auto" ${(d.llm_provider||"auto")==="auto"?"selected":""}>Automatic</option></select></label>
   <label>Model<input name="llm_model" value="${esc(d.llm_model||"")}" placeholder="e.g. gemini-2.5-flash"></label>
@@ -976,6 +976,8 @@ async function viewSetup() {
   <label>Pexels API key<input name="pexels_api_key" type="password" autocomplete="new-password" placeholder="Optional free visuals"></label>
   <label>Pixabay API key<input name="pixabay_api_key" type="password" autocomplete="new-password" placeholder="Optional free visuals"></label>
   <label>ElevenLabs API key<input name="elevenlabs_api_key" type="password" autocomplete="new-password" placeholder="Optional voice"></label>
+  <label>Telegram bot token<input name="telegram_bot_token" type="password" autocomplete="new-password" placeholder="Optional completion and failure alerts"></label>
+  <label>Telegram chat ID<input name="telegram_chat_id" autocomplete="off" placeholder="Optional private chat or group ID"></label>
   <input type="hidden" name="upload_enabled" value="false">
   <label class="check wide"><span>Enable YouTube publishing <small>Keep disabled until you have connected and verified the correct channel.</small></span><input name="upload_enabled" type="checkbox" value="true" ${d.upload_enabled?"checked":""}></label>
   <label class="wide">Google OAuth Desktop client JSON<textarea name="youtube_client_json" rows="5" placeholder="Paste the contents of your Google OAuth Desktop app credentials JSON. You can also place it at credentials.json yourself."></textarea></label>
