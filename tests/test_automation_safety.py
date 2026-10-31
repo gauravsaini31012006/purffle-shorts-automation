@@ -52,3 +52,8 @@ def test_runtime_upload_gate_hard_caps_public_uploads_at_two(tmp_path, monkeypat
 
     assert studio.upload_record(video_id) == "queued"
     assert studio.history.get(video_id)["status"] == "queued"
+
+def test_fresh_environment_keeps_youtube_upload_disabled(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("UPLOAD", raising=False)
+    assert Settings.from_env().upload is False
