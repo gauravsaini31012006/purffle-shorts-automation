@@ -426,11 +426,14 @@ class StudioServer:
                 studio.history.link_idea(idea_id, r.record_id)
                 if bool(p.get("upload")) and s.upload:
                     try:
-                        studio.upload_record(r.record_id, r)
+                        for rendered in [r, *r.variants]:
+                            if rendered.ok and rendered.record_id:
+                                studio.upload_record(rendered.record_id, rendered)
                     except Exception as exc:
                         r.status, r.error = "upload-failed", str(exc)[:500]
                         from . import notify
-                        notify.send(s, "failed", title=r.title, detail=f"Video rendered; upload failed: {r.error}")
+                        notify.send(s, "failed", title=r.title,
+                                    detail=f"Video rendered; upload failed: {r.error}")
             else:
                 studio.history.release_idea(idea_id)
             job.result = _result(r)
