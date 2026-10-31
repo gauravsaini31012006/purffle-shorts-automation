@@ -160,6 +160,11 @@ async function boot() {
     return;
   }
   const i = S.info;
+  try {
+    const setup = await get("/api/setup");
+    if (!setup.profile_count) location.hash = "#profiles";
+    else if (!i.llm_ok && !location.hash) location.hash = "#setup";
+  } catch { /* the dashboard can still be used if setup status is temporarily unavailable */ }
   S.form = Object.assign({
     mode: "topic", topic: "", url: "", style: i.style || "auto", language: i.language, duration: i.duration,
     aspect: ["9:16", "16:9", "1:1", "4:5"].includes(i.aspect) ? i.aspect : "9:16", caption_style: i.caption_style,
@@ -1008,7 +1013,7 @@ async function viewProfiles() {
     el.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{const p=d.profiles[b.dataset.edit],form=$("#profile-form");Object.keys(p).forEach(k=>{if(form.elements[k])form.elements[k].value=p[k]})});
     el.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{if(!confirm("Delete profile?"))return;try{await post("/api/profiles/delete",{name:b.dataset.del});refresh()}catch(e){toast(esc(e.message),"bad")}});
   }
-  $("#profile-form").onsubmit=async e=>{e.preventDefault();try{await post("/api/profiles/save",Object.fromEntries(new FormData(e.currentTarget).entries()));toast("Saved and activated.","ok");refresh()}catch(err){toast(esc(err.message),"bad")}};
+  $("#profile-form").onsubmit=async e=>{e.preventDefault();try{const before=Object.keys((await get("/api/profiles")).profiles||{}).length;await post("/api/profiles/save",Object.fromEntries(new FormData(e.currentTarget).entries()));toast("Saved and activated.","ok");if(!before){location.hash="#setup";return;}refresh()}catch(err){toast(esc(err.message),"bad")}};
   await refresh();
 }
 
