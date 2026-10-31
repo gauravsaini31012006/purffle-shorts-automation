@@ -489,7 +489,10 @@ class StudioServer:
         if aspect not in ASPECTS:
             raise ValueError("Unsupported aspect ratio")
         visual_style = str(payload.get("visual_style") or self.settings.visual_style).strip()[:500]
+        from .llm import PRESETS
         provider = str(payload.get("provider") or self.settings.llm_provider).strip().lower()[:40]
+        if provider not in PRESETS and provider != "auto":
+            raise ValueError("Choose a supported LLM provider")
         model = str(payload.get("model") or self.settings.llm_model).strip()[:120]
         channel_name = str(payload.get("channel_name") or self.settings.channel_name).strip()[:100]
         audience = str(payload.get("audience") or self.settings.audience).strip()[:240]
