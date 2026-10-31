@@ -999,6 +999,7 @@ async function viewProfiles() {
   <label>Model / deployment<input name="model" maxlength="120" placeholder="e.g. gemini-2.5-flash"></label>
   <label>Channel name<input name="channel_name" maxlength="100" placeholder="Your YouTube channel name"></label>
   <label>Target audience<input name="audience" maxlength="240" placeholder="Who should these videos serve?"></label>
+  <label>YouTube account / channel label<input name="youtube_channel" maxlength="100" placeholder="e.g. @YourChannel (for your reference)"></label>
   <label class="wide">Visual direction<textarea name="visual_style" rows="2" maxlength="500"></textarea></label>
   <div class="actions wide"><button class="btn primary" type="submit">Save & activate</button></div></form></section>`;
   async function refresh(){const d=await get("/api/profiles"), rows=Object.values(d.profiles||{}), el=$("#profile-list");
