@@ -266,6 +266,8 @@ class StudioServer:
                             if candidate and candidate["status"] == "used" and candidate.get("video_id"):
                                 state["last_production_run"] = today
                                 state["last_production_status"] = "done"
+                                state["last_production_attempts"] = 0
+                                state["last_production_retry_at"] = None
                                 state["last_production_message"] = (
                                     f"Recovered completed render as video #{candidate['video_id']}"
                                 )
@@ -284,6 +286,9 @@ class StudioServer:
                             # Save the selected ID before enqueueing so it survives a process restart.
                             state["last_production_run"] = today
                             state["last_production_idea_id"] = candidate["id"]
+                            if not recovering:
+                                state["last_production_attempts"] = 0
+                            state["last_production_retry_at"] = None
                             state["last_production_status"] = "queued"
                             state["last_production_message"] = (
                                 "Recovering interrupted approved idea" if recovering
