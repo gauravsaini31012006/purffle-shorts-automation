@@ -357,3 +357,31 @@ def test_setup_can_toggle_upload_without_echoing_secrets(server, tmp_path, monke
     assert status == 200, body
     assert app.settings.upload is False
 
+def test_upload_requests_require_a_connected_youtube_account(server):
+    app, port = server
+    app.settings = app.settings.with_overrides(upload=True)
+    app.studio.s = app.settings
+    status, _, body = req(port, "POST", "/api/make",
+                          {"topic": "test upload gate", "upload": True}, app.token)
+    assert status == 403 and b"Connect a YouTube account" in body
+    status, _, body = req(port, "POST", "/api/upload/1", {}, app.token)
+    assert status == 403 and b"Connect a YouTube account" in body
+
+
+def test_automation_publish_requires_upload_and_oauth(server):
+    app, port = server
+    status, _, body = req(port, "POST", "/api/automation", {"auto_publish": True}, app.token)
+    assert status == 400 and b"UPLOAD=false" in body
+
+    token = app.settings.data_path / "profiles" / "default" / "token.json"
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("test token", encoding="utf-8")
+    app.settings = app.settings.with_overrides(upload=True, token_file=str(token))
+    app.studio.s = app.settings
+    status, _, body = req(port, "POST", "/api/automation",
+                          {"auto_publish": True, "auto_produce": True, "auto_approve_ideas": True}, app.token)
+    assert status == 200, body
+    state = json.loads(req(port, "GET", "/api/automation")[2])
+    assert state["auto_publish"] is True and state["auto_produce"] is True
+    assert state["auto_approve_ideas"] is True
+
