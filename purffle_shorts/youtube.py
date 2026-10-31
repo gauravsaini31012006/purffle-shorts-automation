@@ -90,7 +90,8 @@ def get_credentials(settings: Settings, interactive: bool = True, extra_scopes: 
                 "YouTube Data API v3 enabled, download its JSON as credentials.json, then run the auth command.")
         flow = InstalledAppFlow.from_client_secrets_file(str(secrets), scopes)
         creds = flow.run_local_server(port=0, prompt="consent")
-    token.write_text(creds.to_json())
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text(creds.to_json(), encoding="utf-8")
     try:
         os.chmod(token, 0o600)
     except OSError:
