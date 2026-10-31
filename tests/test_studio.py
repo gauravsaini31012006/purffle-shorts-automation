@@ -282,3 +282,18 @@ def test_setup_status_never_exposes_secret_values(server):
     assert "llm_api_key" not in data
     assert "openai_api_key" not in data
     assert "youtube_connected" in data
+
+
+def test_setup_saves_credentials_without_returning_secret(server, tmp_path, monkeypatch):
+    app, port = server
+    monkeypatch.chdir(tmp_path)
+    secret = "test-secret-never-return-this"
+    status, _, body = req(port, "POST", "/api/setup",
+                          {"llm_provider": "gemini", "llm_model": "gemini-2.5-flash",
+                           "llm_api_key": secret}, app.token)
+    assert status == 200, body
+    assert secret.encode() not in body
+    assert app.settings.llm_api_key == secret
+    assert "LLM_API_KEY=" in (tmp_path / ".env").read_text(encoding="utf-8")
+    state = json.loads(req(port, "GET", "/api/setup")[2])
+    assert state["llm_key_set"] is True
