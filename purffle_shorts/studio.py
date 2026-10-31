@@ -895,7 +895,10 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
             if m and int(m.group(1)) in app.jobs:
                 return self._json(app.jobs[int(m.group(1))].public(full_log=True))
             if path == "/api/ideas":
-                return self._json({"pending": app.studio.history.ideas("pending"),
+                pending = app.studio.history.ideas("pending")
+                return self._json({"pending": pending,
+                                   "review": [i for i in pending if not i.get("approved")],
+                                   "approved": [i for i in pending if i.get("approved")],
                                    "used": app.studio.history.ideas("used", 30)})
             if path == "/api/doctor":
                 from .doctor import checks
@@ -1022,8 +1025,23 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                 if not subject:
                     return self._json({"error": "empty idea"}, 400)
                 from .script import STYLES
-                return self._json({"id": h.add_idea(subject[:300], _choice(body.get("style"), STYLES, ""),
-                                                    str(body.get("notes") or "")[:500])})
+                idea_id = h.add_idea(subject[:300], _choice(body.get("style"), STYLES, ""),
+                                       str(body.get("notes") or "")[:500], approved=False)
+                return self._json({"id": idea_id, "status": "review"})
+            m = re.fullmatch(r"/api/ideas/(\d+)/approve", path)
+            if m:
+                ok = h.approve_idea(int(m.group(1)))
+                return self._json({"ok": ok}, 200 if ok else 404)
+            m = re.fullmatch(r"/api/ideas/(\d+)/make", path)
+            if m:
+                idea_id = int(m.group(1))
+                idea = next((i for i in h.ideas("pending") if i["id"] == idea_id), None)
+                if not idea:
+                    return self._json({"error": "idea not found"}, 404)
+                if not idea.get("approved"):
+                    return self._json({"error": "approve this idea before production"}, 409)
+                return self._json({"job": app.submit("make_idea", {"idea_id": idea_id, "upload": False},
+                                                     f"Make idea: {idea['subject'][:90]}").id})
             m = re.fullmatch(r"/api/ideas/(\d+)/delete", path)
             if m:
                 h.delete_idea(int(m.group(1)))
