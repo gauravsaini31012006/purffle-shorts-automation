@@ -424,6 +424,7 @@ def test_scheduler_recovers_claimed_idea_after_restart(server, monkeypatch):
     }))
     class OnePass:
         calls = 0
+
         def wait(self, _seconds):
             self.calls += 1
             return self.calls > 1
@@ -459,6 +460,7 @@ def test_scheduler_retries_failed_production_after_cooldown(server, monkeypatch)
 
     class OnePass:
         calls = 0
+
         def wait(self, _seconds):
             self.calls += 1
             return self.calls > 1
@@ -501,6 +503,7 @@ def test_scheduler_does_not_retry_after_two_failed_attempts(server, monkeypatch)
 
     class OnePass:
         calls = 0
+
         def wait(self, _seconds):
             self.calls += 1
             return self.calls > 1
@@ -532,6 +535,7 @@ def test_scheduler_recovers_interrupted_upload_flush_after_restart(server, monke
 
     class OnePass:
         calls = 0
+
         def wait(self, _seconds):
             self.calls += 1
             return self.calls > 1
