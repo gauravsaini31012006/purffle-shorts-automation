@@ -212,6 +212,13 @@ def test_page_has_no_inline_styles_or_scripts(server):
     assert not re.search(r"""\sstyle=["']""", js)
 
 
+def test_upload_api_respects_upload_false(server):
+    app, port = server
+    status, _, body = req(port, "POST", "/api/upload/1", {}, app.token)
+    assert status == 403
+    assert b"UPLOAD=false" in body
+
+
 def test_automation_settings_are_persistent_and_validated(server):
     app, port = server
     initial = json.loads(req(port, "GET", "/api/automation")[2])
