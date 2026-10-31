@@ -127,6 +127,13 @@ class History:
     def uploads_since(self, since_iso: str) -> int:
         return self._all("SELECT COUNT(*) AS n FROM videos WHERE uploaded_at >= ?", (since_iso,))[0]["n"]
 
+    def youtube_uploads_last_24h(self, since_iso: str) -> int:
+        """Count completed YouTube uploads in a rolling window (scheduled uploads count conservatively)."""
+        return self._all(
+            "SELECT COUNT(*) AS n FROM videos WHERE youtube_id IS NOT NULL AND uploaded_at >= ?",
+            (since_iso,),
+        )[0]["n"]
+
     def scheduled_times(self) -> list[str]:
         return [r["publish_at"] for r in self._all(
             "SELECT publish_at FROM videos WHERE publish_at IS NOT NULL AND status = 'scheduled'")]
