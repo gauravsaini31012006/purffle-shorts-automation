@@ -218,11 +218,11 @@ def test_automation_settings_are_persistent_and_validated(server):
     assert initial["enabled"] is False
     assert initial["mode"] == "research_only"
     status, _, body = req(port, "POST", "/api/automation",
-                          {"enabled": True, "plan_time": "08:45", "timezone": "Asia/Kolkata",
+                          {"enabled": True, "plan_time": "23:59", "timezone": "Asia/Kolkata",
                            "ideas_per_run": 12}, app.token)
     assert status == 200, body
     saved = json.loads(req(port, "GET", "/api/automation")[2])
-    assert saved["enabled"] is True and saved["plan_time"] == "08:45"
+    assert saved["enabled"] is True and saved["plan_time"] == "23:59"
     assert saved["timezone"] == "Asia/Kolkata" and saved["ideas_per_run"] == 12
     status, _, body = req(port, "POST", "/api/automation", {"plan_time": "25:99"}, app.token)
     assert status == 400 and b"HH:MM" in body
