@@ -97,6 +97,13 @@ class StudioServer:
         from .pipeline import Studio
         self.settings = settings
         self.studio = Studio(settings)
+        # Restore the last selected creator profile after a restart.
+        try:
+            active_profile = self.studio.history.get_meta("studio_active_profile")
+            if active_profile and active_profile != "Default":
+                self.apply_profile(active_profile)
+        except (KeyError, TypeError, ValueError):
+            log.warning("Could not restore the active creator profile")
         # STUDIO_TOKEN fixes the write token, so scripts and tools like n8n can call the API (see docs/api.md)
         self.token = os.getenv("STUDIO_TOKEN", "").strip() or secrets.token_urlsafe(24)
         self.jobs: dict[int, Job] = {}
