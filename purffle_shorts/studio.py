@@ -698,6 +698,8 @@ class StudioServer:
             "youtube_connected": token.exists(),
             "youtube_auth_status": self.studio.history.get_meta("youtube_auth_status") or "not_started",
             "upload_enabled": bool(s.upload),
+            "telegram_configured": bool(os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+                                         and os.getenv("TELEGRAM_CHAT_ID", "").strip()),
             "privacy": s.privacy,
             "profile_count": len(self.profiles()["profiles"]),
         }
@@ -730,6 +732,11 @@ class StudioServer:
         }
         updates = {}
         for env_name, field_name in allowed.items():
+            value = payload.get(field_name)
+            if value is not None and str(value).strip():
+                updates[env_name] = str(value).strip()
+        for env_name, field_name in (("TELEGRAM_BOT_TOKEN", "telegram_bot_token"),
+                                     ("TELEGRAM_CHAT_ID", "telegram_chat_id")):
             value = payload.get(field_name)
             if value is not None and str(value).strip():
                 updates[env_name] = str(value).strip()
