@@ -590,6 +590,18 @@ class Studio:
         if not on_youtube and not others:
             log.info("Video #%d is already on %s", rid, ", ".join(to))
             return rec["status"]
+        # Hard rolling-window safety cap. Count scheduled uploads too: they already consumed an upload
+        # and are intended to become public. This deliberately errs on the safe side.
+        if on_youtube and self.history.youtube_uploads_last_24h(
+                (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
+        ) >= self.s.max_uploads_24h:
+            log.warning("Rolling 24-hour YouTube upload cap (%d) reached — video #%d queued",
+                        self.s.max_uploads_24h, rid)
+            self.history.update_video(rid, status="queued")
+            if result:
+                result.status = "queued"
+            notify.send(self.s, "queued", title=rec["title"], detail="rolling 24-hour upload cap reached")
+            return "queued"
         if self.quota_left() <= 0:
             log.warning("Daily upload limit (%d) reached — video #%d queued for tomorrow", self.s.daily_upload_limit, rid)
             self.history.update_video(rid, status="queued")
