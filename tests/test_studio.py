@@ -397,3 +397,8 @@ def test_flush_uploads_worker_job_reports_completed_count(server, monkeypatch):
     assert job["status"] == "done", job
     assert job["result"]["uploaded"] == 3
 
+def test_new_settings_default_to_local_render_only():
+    from purffle_shorts.config import Settings
+    assert Settings().upload is False
+    assert Settings().max_uploads_24h == 2
+
