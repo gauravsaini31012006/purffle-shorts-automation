@@ -503,9 +503,13 @@ class StudioServer:
         model = str(payload.get("model") or self.settings.llm_model).strip()[:120]
         channel_name = str(payload.get("channel_name") or self.settings.channel_name).strip()[:100]
         audience = str(payload.get("audience") or self.settings.audience).strip()[:240]
+        youtube_channel = str(payload.get("youtube_channel") or "").strip()[:100]
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "creator"
+        token_file = str(Path(self.settings.data_dir) / "profiles" / slug / "token.json")
         profile = {"name": name, "niche": niche, "style": style, "language": language,
                    "duration": duration, "aspect": aspect, "visual_style": visual_style,
-                   "provider": provider, "model": model, "channel_name": channel_name, "audience": audience}
+                   "provider": provider, "model": model, "channel_name": channel_name, "audience": audience,
+                   "youtube_channel": youtube_channel, "token_file": token_file}
         state = self.profiles()
         state["profiles"][name] = profile
         self.studio.history.set_meta("studio_profiles", json.dumps(state["profiles"], ensure_ascii=False))
@@ -524,7 +528,8 @@ class StudioServer:
             visual_style=profile["visual_style"], llm_provider=profile.get("provider", self.settings.llm_provider),
             llm_model=profile.get("model", self.settings.llm_model),
             channel_name=profile.get("channel_name", self.settings.channel_name),
-            audience=profile.get("audience", self.settings.audience))
+            audience=profile.get("audience", self.settings.audience),
+            token_file=profile.get("token_file", self.settings.token_file))
         self.studio.settings = self.settings
         self.studio.history.set_meta("studio_active_profile", str(name))
         return {"profile": profile, "active": str(name)}
