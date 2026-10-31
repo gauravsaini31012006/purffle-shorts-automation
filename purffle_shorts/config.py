@@ -179,7 +179,7 @@ class Settings:
     sfx_volume: float = 1.0           # 1.0 = 11 dB under the voice; 0.5 is quieter, 2.0 louder
 
     # --- YouTube --------------------------------------------------------------------------
-    upload: bool = True
+    upload: bool = False
     privacy: str = "public"           # public|unlisted|private
     publish_times: list[str] = field(default_factory=list)  # e.g. 09:00,14:00,19:00 -> scheduled
     timezone: str = ""
