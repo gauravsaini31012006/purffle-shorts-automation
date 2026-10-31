@@ -488,8 +488,13 @@ class StudioServer:
         if aspect not in ASPECTS:
             raise ValueError("Unsupported aspect ratio")
         visual_style = str(payload.get("visual_style") or self.settings.visual_style).strip()[:500]
+        provider = str(payload.get("provider") or self.settings.llm_provider).strip().lower()[:40]
+        model = str(payload.get("model") or self.settings.llm_model).strip()[:120]
+        channel_name = str(payload.get("channel_name") or self.settings.channel_name).strip()[:100]
+        audience = str(payload.get("audience") or self.settings.audience).strip()[:240]
         profile = {"name": name, "niche": niche, "style": style, "language": language,
-                   "duration": duration, "aspect": aspect, "visual_style": visual_style}
+                   "duration": duration, "aspect": aspect, "visual_style": visual_style,
+                   "provider": provider, "model": model, "channel_name": channel_name, "audience": audience}
         state = self.profiles()
         state["profiles"][name] = profile
         self.studio.history.set_meta("studio_profiles", json.dumps(state["profiles"], ensure_ascii=False))
@@ -505,7 +510,10 @@ class StudioServer:
         self.settings = self.settings.with_overrides(
             niches=[profile["niche"]], style=profile["style"], language=profile["language"],
             target_seconds=profile["duration"], resolution=aspect_resolution(profile["aspect"]),
-            visual_style=profile["visual_style"])
+            visual_style=profile["visual_style"], llm_provider=profile.get("provider", self.settings.llm_provider),
+            llm_model=profile.get("model", self.settings.llm_model),
+            channel_name=profile.get("channel_name", self.settings.channel_name),
+            audience=profile.get("audience", self.settings.audience))
         self.studio.settings = self.settings
         self.studio.history.set_meta("studio_active_profile", str(name))
         return {"profile": profile, "active": str(name)}
