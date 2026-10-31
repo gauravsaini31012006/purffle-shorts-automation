@@ -528,6 +528,83 @@ class StudioServer:
             self.studio.history.set_meta("studio_active_profile", "Default")
         return self.profiles()
 
+    def setup_state(self) -> dict:
+        """Return connection readiness only; never return API keys, OAuth tokens, or secret values."""
+        s = self.settings
+        token = Path(s.token_file)
+        return {
+            "llm_provider": s.llm_provider, "llm_model": s.llm_model,
+            "llm_key_set": bool(s.llm_api_key or s.openai_api_key),
+            "pexels_key_set": bool(s.pexels_api_key), "pixabay_key_set": bool(s.pixabay_api_key),
+            "elevenlabs_key_set": bool(s.elevenlabs_api_key),
+            "youtube_client_file": Path(s.client_secrets).exists(),
+            "youtube_connected": token.exists(),
+            "upload_enabled": bool(s.upload),
+            "privacy": s.privacy,
+            "profile_count": len(self.profiles()["profiles"]),
+        }
+
+    def save_setup(self, payload: dict) -> dict:
+        """Save user-supplied provider credentials locally, reload settings, and never echo secrets."""
+        allowed = {
+            "LLM_PROVIDER": "llm_provider", "LLM_MODEL": "llm_model", "LLM_BASE_URL": "llm_base_url",
+            "LLM_API_KEY": "llm_api_key", "OPENAI_API_KEY": "openai_api_key",
+            "PEXELS_API_KEY": "pexels_api_key", "PIXABAY_API_KEY": "pixabay_api_key",
+            "ELEVENLABS_API_KEY": "elevenlabs_api_key",
+        }
+        updates = {}
+        for env_name, field_name in allowed.items():
+            value = payload.get(field_name)
+            if value is not None and str(value).strip():
+                updates[env_name] = str(value).strip()
+        client_json = str(payload.get("youtube_client_json") or "").strip()
+        if client_json:
+            try:
+                parsed = json.loads(client_json)
+                client = parsed.get("installed") or parsed.get("web") or {}
+                if not client.get("client_id") or not client.get("client_secret"):
+                    raise ValueError
+            except (ValueError, TypeError, AttributeError):
+                raise ValueError("Google OAuth JSON is invalid. Use a Desktop app OAuth client JSON file.") from None
+            target = Path(self.settings.client_secrets).expanduser()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(parsed, indent=2), encoding="utf-8")
+            try:
+                os.chmod(target, 0o600)
+            except OSError:
+                pass
+        if updates:
+            env_path = Path(".env")
+            existing = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+            lines = existing.splitlines()
+            seen = set()
+            for index, line in enumerate(lines):
+                match = re.match(r"^\s*([A-Z][A-Z0-9_]*)\s*=", line)
+                if match and match.group(1) in updates:
+                    key = match.group(1)
+                    lines[index] = f"{key}={json.dumps(updates[key])}"
+                    seen.add(key)
+            for key, value in updates.items():
+                if key not in seen:
+                    lines.append(f"{key}={json.dumps(value)}")
+            temp = env_path.with_suffix(".env.tmp")
+            temp.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+            try:
+                os.chmod(temp, 0o600)
+            except OSError:
+                pass
+            temp.replace(env_path)
+            os.environ.update(updates)
+        from .config import Settings
+        fresh = Settings.from_env()
+        # Preserve the safe publishing default: credentials alone never turn publishing on.
+        fresh = fresh.with_overrides(upload=self.settings.upload)
+        from .pipeline import Studio
+        self.settings = fresh
+        self.studio = Studio(fresh)
+        self.changed()
+        return self.setup_state()
+
     def backgrounds(self) -> list[dict]:
         """Background videos to offer: BACKGROUND_VIDEO (a file, or every video in that folder) and
         media/backgrounds/."""
@@ -689,6 +766,8 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                 return self._json(app.options())
             if path == "/api/profiles":
                 return self._json(app.profiles())
+            if path == "/api/setup":
+                return self._json(app.setup_state())
             if path == "/api/automation":
                 return self._json(app.automation_state())
             if path == "/api/videos":
@@ -784,6 +863,11 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
             if path == "/api/automation":
                 try:
                     return self._json(app.update_automation(body))
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+            if path == "/api/setup":
+                try:
+                    return self._json(app.save_setup(body))
                 except ValueError as e:
                     return self._json({"error": str(e)}, 400)
             if path == "/api/profiles/save":
