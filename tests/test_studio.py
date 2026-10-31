@@ -223,7 +223,10 @@ def test_automation_settings_are_persistent_and_validated(server):
     app, port = server
     initial = json.loads(req(port, "GET", "/api/automation")[2])
     assert initial["enabled"] is False
-    assert initial["mode"] == "research_only"
+    assert initial["mode"] == "review_required"
+    assert initial["auto_approve_ideas"] is False
+    assert initial["auto_produce"] is False
+    assert initial["auto_publish"] is False
     status, _, body = req(port, "POST", "/api/automation",
                           {"enabled": True, "plan_time": "23:59", "timezone": "Asia/Kolkata",
                            "ideas_per_run": 12}, app.token)
@@ -233,6 +236,8 @@ def test_automation_settings_are_persistent_and_validated(server):
     assert saved["timezone"] == "Asia/Kolkata" and saved["ideas_per_run"] == 12
     status, _, body = req(port, "POST", "/api/automation", {"plan_time": "25:99"}, app.token)
     assert status == 400 and b"HH:MM" in body
+    status, _, body = req(port, "POST", "/api/automation", {"auto_publish": True}, app.token)
+    assert status == 400 and b"UPLOAD=false" in body
 
 
 def test_rolling_upload_limit_counts_public_and_unknown_visibility(server):
@@ -301,3 +306,54 @@ def test_setup_saves_credentials_without_returning_secret(server, tmp_path, monk
     assert "LLM_API_KEY=" in (tmp_path / ".env").read_text(encoding="utf-8")
     state = json.loads(req(port, "GET", "/api/setup")[2])
     assert state["llm_key_set"] is True
+
+def test_ideas_require_approval_and_selected_make_uses_the_requested_id(server, monkeypatch):
+    app, port = server
+    status, _, body = req(port, "POST", "/api/ideas",
+                          {"subject": "Why the sky turns red at sunset", "style": "facts"}, app.token)
+    assert status == 200
+    iid = json.loads(body)["id"]
+    data = json.loads(req(port, "GET", "/api/ideas")[2])
+    assert [i["id"] for i in data["review"]] == [iid]
+    assert data["approved"] == []
+
+    status, _, body = req(port, "POST", f"/api/ideas/{iid}/make", {}, app.token)
+    assert status == 409 and b"approve" in body
+    status, _, body = req(port, "POST", f"/api/ideas/{iid}/approve", {}, app.token)
+    assert status == 200 and json.loads(body)["ok"] is True
+
+    captured = []
+    class Stub:
+        id = 987
+    monkeypatch.setattr(app, "submit", lambda kind, params, label="": (
+        captured.append((kind, params, label)) or Stub()))
+    status, _, body = req(port, "POST", f"/api/ideas/{iid}/make", {}, app.token)
+    assert status == 200 and json.loads(body)["job"] == 987
+    assert captured[0][0] == "make_idea"
+    assert captured[0][1]["idea_id"] == iid
+    assert captured[0][1]["upload"] is False
+
+
+def test_history_claims_only_approved_ideas_and_can_target_an_id(server):
+    h = server[0].studio.history
+    first = h.add_idea("First approved idea", approved=True)
+    second = h.add_idea("Second approved idea", approved=True)
+    review = h.add_idea("Needs a human review", approved=False)
+    assert h.claim_idea(second)["id"] == second
+    assert h.claim_idea(second) is None
+    assert h.claim_idea()["id"] == first
+    assert h.claim_idea(review) is None
+
+
+def test_setup_can_toggle_upload_without_echoing_secrets(server, tmp_path, monkeypatch):
+    app, port = server
+    monkeypatch.chdir(tmp_path)
+    status, _, body = req(port, "POST", "/api/setup", {"upload_enabled": True}, app.token)
+    assert status == 200, body
+    assert app.settings.upload is True
+    assert json.loads(req(port, "GET", "/api/setup")[2])["upload_enabled"] is True
+    assert 'UPLOAD="true"' in (tmp_path / ".env").read_text(encoding="utf-8")
+    status, _, body = req(port, "POST", "/api/setup", {"upload_enabled": False}, app.token)
+    assert status == 200, body
+    assert app.settings.upload is False
+
