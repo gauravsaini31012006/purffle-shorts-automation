@@ -148,6 +148,7 @@ class StudioServer:
                 "last_status": state.get("last_status") or "idle",
                 "last_message": state.get("last_message") or "",
                 "last_production_run": state.get("last_production_run"),
+                "last_production_idea_id": state.get("last_production_idea_id"),
                 "last_production_status": state.get("last_production_status") or "idle",
                 "last_production_message": state.get("last_production_message") or "",
                 "last_upload_flush": state.get("last_upload_flush"),
@@ -201,11 +202,21 @@ class StudioServer:
                 if now.strftime("%H:%M") < state["plan_time"]:
                     continue
 
-                # Queue research at most once per local calendar day.
-                if state.get("last_run") != today:
+                # The job queue is in memory; requeue research if a restart discarded a job
+                # after its date was saved but before the worker completed it.
+                with self._lock:
+                    active_research = any(
+                        j.kind == "plan" and j.params.get("scheduled")
+                        and j.status in ("queued", "running") for j in self.jobs.values()
+                    )
+                research_due = state.get("last_run") != today
+                research_recovery = (state.get("last_run") == today
+                                     and state["last_status"] == "queued" and not active_research)
+                if research_due or research_recovery:
                     state["last_run"] = today
                     state["last_status"] = "queued"
-                    state["last_message"] = "Daily idea research queued"
+                    state["last_message"] = ("Daily idea research queued" if research_due
+                                             else "Recovering interrupted idea research")
                     self.studio.history.set_meta("studio_automation", json.dumps(state))
                     profiles = self.profiles()
                     profile = profiles["profiles"].get(profiles["active"], {})
@@ -224,26 +235,50 @@ class StudioServer:
                     self.studio.history.set_meta("studio_automation", json.dumps(state))
                     self.submit("flush_uploads", {"scheduled": True}, "Retry queued YouTube uploads")
 
-                # Production is checked independently of research completion. This means an idea
-                # approved later in the day can still be rendered without waiting for tomorrow.
-                if state["auto_produce"] and state.get("last_production_run") != today:
-                    with self._lock:
-                        active_idea_ids = {
-                            int(j.params.get("idea_id") or 0) for j in self.jobs.values()
-                            if j.kind == "make_idea" and j.status in ("queued", "running")
-                        }
-                    candidate = next((idea for idea in self.studio.history.ideas("pending")
-                                      if idea.get("approved") and idea["id"] not in active_idea_ids), None)
-                    if candidate:
-                        publish = bool(state["auto_publish"] and self.settings.upload
-                                       and Path(self.settings.token_file).expanduser().exists())
-                        # Persist the date before enqueueing: no duplicate daily render after restart.
-                        state["last_production_run"] = today
-                        state["last_production_status"] = "queued"
-                        state["last_production_message"] = "Approved idea queued for production"
-                        self.studio.history.set_meta("studio_automation", json.dumps(state))
-                        self.submit("make_idea", {"idea_id": candidate["id"], "upload": publish,
-                                                  "scheduled": True}, "Scheduled daily Short")
+                # Production runs independently of research completion; late approvals still run today.
+                # A queued approved idea is re-enqueued if Studio restarted before it completed.
+                if state["auto_produce"]:
+                    last_idea_id = int(state.get("last_production_idea_id") or 0)
+                    recovering = (state.get("last_production_run") == today
+                                  and state["last_production_status"] == "queued" and last_idea_id > 0)
+                    eligible_today = state.get("last_production_run") != today or recovering
+                    if eligible_today:
+                        with self._lock:
+                            active_idea_ids = {
+                                int(j.params.get("idea_id") or 0) for j in self.jobs.values()
+                                if j.kind == "make_idea" and j.status in ("queued", "running")
+                            }
+                        candidate = None
+                        if recovering and last_idea_id not in active_idea_ids:
+                            candidate = self.studio.history.get_idea(last_idea_id)
+                            if candidate and candidate["status"] == "used" and candidate.get("video_id"):
+                                state["last_production_status"] = "done"
+                                state["last_production_message"] = (
+                                    f"Recovered completed render as video #{candidate['video_id']}"
+                                )
+                                self.studio.history.set_meta("studio_automation", json.dumps(state))
+                                candidate = None
+                            elif candidate and candidate["status"] == "used":
+                                # Claimed but no video record: release it so this idea can be retried.
+                                self.studio.history.release_idea(last_idea_id)
+                                candidate = self.studio.history.get_idea(last_idea_id)
+                        elif not recovering:
+                            candidate = next((idea for idea in self.studio.history.ideas("pending")
+                                              if idea.get("approved") and idea["id"] not in active_idea_ids), None)
+                        if candidate and candidate["status"] == "pending" and candidate.get("approved"):
+                            publish = bool(state["auto_publish"] and self.settings.upload
+                                           and Path(self.settings.token_file).expanduser().exists())
+                            # Save the selected ID before enqueueing so it survives a process restart.
+                            state["last_production_run"] = today
+                            state["last_production_idea_id"] = candidate["id"]
+                            state["last_production_status"] = "queued"
+                            state["last_production_message"] = (
+                                "Recovering interrupted approved idea" if recovering
+                                else "Approved idea queued for production"
+                            )
+                            self.studio.history.set_meta("studio_automation", json.dumps(state))
+                            self.submit("make_idea", {"idea_id": candidate["id"], "upload": publish,
+                                                      "scheduled": True}, "Scheduled daily Short")
             except Exception:
                 log.exception("Daily automation scheduler failed")
 
