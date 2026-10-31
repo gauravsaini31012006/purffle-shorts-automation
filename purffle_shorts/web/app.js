@@ -936,13 +936,14 @@ async function viewChannel() {
     <div class="kpi"><small>Total views</small><b>${fmtNum(i.views)}</b></div>
     <div class="kpi"><small>Ideas queued</small><b>${fmtNum(i.ideas)}</b></div>
   </div>
+  ${ch.summary ? `<div class="kpis"><div class="kpi"><small>Avg. views / video</small><b>${fmtNum(ch.summary.avg_views)}</b></div><div class="kpi"><small>Likes</small><b>${fmtNum(ch.summary.likes)}</b></div><div class="kpi"><small>Comments</small><b>${fmtNum(ch.summary.comments)}</b></div><div class="kpi"><small>Engagement</small><b>${ch.summary.engagement_rate}%</b></div></div>` : ""}
   ${ch.calibration && ch.calibration.videos ? calibrationCard(ch.calibration) : ""}
   ${ch.videos.length ? `<div class="grid2">
     <section class="card">${sh("03", "Average views by format")}${ch.by_style.map(s => `<div class="hbar"><span>${esc(s.style)}</span><span class="track"><i data-w="${100 * s.avg_views / top}"></i></span><span class="num">${fmtNum(s.avg_views)}</span></div>`).join("")}</section>
     <section class="card">${sh("04", "Best performer")}${(() => { const v = ch.videos[0]; return `<h3>${esc(v.title)}</h3><p class="muted">${fmtNum(v.views)} views · ${fmtNum(v.likes)} likes · ${esc(v.style || "")}</p><button class="btn sm" type="button" data-open="${v.id}">${I.play}Open</button>`; })()}</section>
   </div>
-  <section class="card">${sh("05", "Videos")}<table><thead><tr><th>Title</th><th>Format</th><th class="num">Score</th><th class="num">Views</th><th class="num">Likes</th></tr></thead>
-    <tbody>${ch.videos.map(v => `<tr><td><a href="#library" data-open="${v.id}">${esc(v.title)}</a></td><td>${esc(v.style || "")}</td><td class="num">${v.score ?? "–"}</td><td class="num">${fmtNum(v.views)}</td><td class="num">${fmtNum(v.likes)}</td></tr>`).join("")}</tbody></table></section>`
+  <section class="card">${sh("05", "Videos")}<table><thead><tr><th>Title</th><th>Format</th><th class="num">Score</th><th class="num">Views</th><th class="num">Likes</th><th class="num">Engagement</th></tr></thead>
+    <tbody>${ch.videos.map(v => `<tr><td><a href="#library" data-open="${v.id}">${esc(v.title)}</a></td><td>${esc(v.style || "")}</td><td class="num">${v.score ?? "–"}</td><td class="num">${fmtNum(v.views)}</td><td class="num">${fmtNum(v.likes)}</td><td class="num">${v.engagement_rate}%</td></tr>`).join("")}</tbody></table></section>`
     : empty("NO DATA YET", "No stats yet", "Publish some videos, then refresh. View counts need a day or two to mean something.")}`;
   paint(main);
   $("#sync").onclick = async () => { try { await post("/api/stats"); toast("Refreshing stats…", "info"); tick(); } catch (e) { toast(esc(e.message), "bad"); } };
