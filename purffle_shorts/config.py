@@ -350,7 +350,7 @@ class Settings:
             voice_enhance=_bool(_env("VOICE_ENHANCE", "true")),
             sound_effects=_bool(_env("SOUND_EFFECTS", "true")),
             sfx_volume=max(0.0, _float("SFX_VOLUME", d.sfx_volume)),
-            upload=_bool(_env("UPLOAD", "true")),
+            upload=_bool(_env("UPLOAD", "false")),
             privacy=_env("YT_PRIVACY", d.privacy).lower(),
             publish_times=_list(_env("PUBLISH_TIMES")),
             timezone=_env("TIMEZONE"),
