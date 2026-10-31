@@ -704,6 +704,8 @@ class StudioServer:
             os.environ.update(updates)
         field_updates = {field_name: updates[env_name] for env_name, field_name in allowed.items()
                          if env_name in updates}
+        if "UPLOAD" in updates:
+            field_updates["upload"] = updates["UPLOAD"].lower() == "true"
         # Keep all current runtime choices; only replace the fields explicitly edited in Setup.
         fresh = self.settings.with_overrides(**field_updates)
         self.settings = fresh
