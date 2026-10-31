@@ -210,3 +210,23 @@ def test_page_has_no_inline_styles_or_scripts(server):
     js = req(port, "GET", "/static/app.js")[2].decode()
     assert not re.search(r"\sstyle=", html) and not re.search(r"<script>(?!\s*</script>)", html)
     assert not re.search(r"""\sstyle=["']""", js)
+
+
+def test_profile_api_persists_and_applies_settings(server):
+    app, port = server
+    assert req(port, "GET", "/api/profiles")[0] == 200
+    payload = {"name": "Space Lab", "niche": "space science", "style": "explainer",
+               "language": "en", "duration": 55, "aspect": "9:16",
+               "visual_style": "cinematic documentary"}
+    status, _, body = req(port, "POST", "/api/profiles/save", payload, app.token)
+    assert status == 200, body
+    assert app.settings.niches == ["space science"]
+    assert app.settings.target_seconds == 55
+    data = json.loads(req(port, "GET", "/api/profiles")[2])
+    assert data["active"] == "Space Lab"
+    assert data["profiles"]["Space Lab"]["visual_style"] == "cinematic documentary"
+    status, _, _ = req(port, "POST", "/api/profiles/apply", {"name": "missing"}, app.token)
+    assert status == 400
+    status, _, _ = req(port, "POST", "/api/profiles/delete", {"name": "Space Lab"}, app.token)
+    assert status == 200
+    assert "Space Lab" not in json.loads(req(port, "GET", "/api/profiles")[2])["profiles"]
