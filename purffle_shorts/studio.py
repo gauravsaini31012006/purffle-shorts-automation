@@ -157,7 +157,7 @@ class StudioServer:
     def update_automation(self, payload: dict) -> dict:
         state = self.automation_state()
         if "enabled" in payload:
-            state["enabled"] = bool(payload["enabled"])
+            state["enabled"] = _flag(payload["enabled"])
         if "plan_time" in payload:
             value = str(payload["plan_time"])
             if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
