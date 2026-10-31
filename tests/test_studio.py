@@ -385,3 +385,12 @@ def test_automation_publish_requires_upload_and_oauth(server):
     assert state["auto_publish"] is True and state["auto_produce"] is True
     assert state["auto_approve_ideas"] is True
 
+def test_flush_uploads_worker_job_reports_completed_count(server, monkeypatch):
+    from purffle_shorts.pipeline import Studio as PipelineStudio
+    app, port = server
+    monkeypatch.setattr(PipelineStudio, "flush_queue", lambda self: 3)
+    jid = app.submit("flush_uploads", {}, "Retry queued uploads").id
+    job = _job(port, jid)
+    assert job["status"] == "done", job
+    assert job["result"]["uploaded"] == 3
+
