@@ -379,6 +379,68 @@ class StudioServer:
                 "visuals": ["pexels", "pixabay", "local", "pollinations", "openai-images"],
                 "backgrounds": self.backgrounds()}
 
+    # -- reusable content profiles ---------------------------------------------------------
+    def profiles(self) -> dict:
+        try:
+            saved = json.loads(self.studio.history.get_meta("studio_profiles") or "{}")
+        except (TypeError, ValueError):
+            saved = {}
+        if not isinstance(saved, dict):
+            saved = {}
+        active = str(self.studio.history.get_meta("studio_active_profile") or "Default")
+        return {"profiles": saved, "active": active}
+
+    def save_profile(self, payload: dict) -> dict:
+        from .script import STYLES
+        name = str(payload.get("name") or "").strip()[:48]
+        if not name:
+            raise ValueError("Profile name is required")
+        niche = str(payload.get("niche") or "").strip()[:240]
+        if not niche:
+            raise ValueError("Niche is required")
+        style = _choice(payload.get("style"), STYLES, "auto")
+        language = str(payload.get("language") or self.settings.language).strip().lower()[:8]
+        if not re.fullmatch(r"[a-z]{2,3}(?:-[A-Za-z0-9]{2,4})?", language):
+            raise ValueError("Invalid language code")
+        try:
+            duration = max(10, min(170, int(payload.get("duration") or self.settings.target_seconds)))
+        except (TypeError, ValueError):
+            raise ValueError("Duration must be a number") from None
+        aspect = str(payload.get("aspect") or "9:16")
+        if aspect not in ASPECTS:
+            raise ValueError("Unsupported aspect ratio")
+        visual_style = str(payload.get("visual_style") or self.settings.visual_style).strip()[:500]
+        profile = {"name": name, "niche": niche, "style": style, "language": language,
+                   "duration": duration, "aspect": aspect, "visual_style": visual_style}
+        state = self.profiles()
+        state["profiles"][name] = profile
+        self.studio.history.set_meta("studio_profiles", json.dumps(state["profiles"], ensure_ascii=False))
+        self.studio.history.set_meta("studio_active_profile", name)
+        return {"profile": profile, "active": name}
+
+    def apply_profile(self, name: str) -> dict:
+        state = self.profiles()
+        profile = state["profiles"].get(str(name))
+        if not isinstance(profile, dict):
+            raise ValueError("Profile not found")
+        self.settings = self.settings.with_overrides(
+            niches=[profile["niche"]], style=profile["style"], language=profile["language"],
+            target_seconds=profile["duration"], resolution=aspect_resolution(profile["aspect"]),
+            visual_style=profile["visual_style"])
+        self.studio.settings = self.settings
+        self.studio.history.set_meta("studio_active_profile", str(name))
+        return {"profile": profile, "active": str(name)}
+
+    def delete_profile(self, name: str) -> dict:
+        state = self.profiles()
+        if name == "Default":
+            raise ValueError("The Default profile cannot be deleted")
+        state["profiles"].pop(name, None)
+        self.studio.history.set_meta("studio_profiles", json.dumps(state["profiles"], ensure_ascii=False))
+        if state["active"] == name:
+            self.studio.history.set_meta("studio_active_profile", "Default")
+        return self.profiles()
+
     def backgrounds(self) -> list[dict]:
         """Background videos to offer: BACKGROUND_VIDEO (a file, or every video in that folder) and
         media/backgrounds/."""
