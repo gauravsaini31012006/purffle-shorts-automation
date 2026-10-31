@@ -10,6 +10,7 @@ logged and ignored.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 
 from .config import Settings
@@ -42,14 +43,25 @@ def payload(webhook: str, event: str, data: dict) -> dict:
 def send(settings: Settings, event: str, **data) -> threading.Thread | None:
     """Post in the background. Returns the thread (tests join it)."""
     hook = settings.notify_webhook
-    if not hook:
+    telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    telegram_chat = os.getenv("TELEGRAM_CHAT_ID", "").strip()
+    if not hook and not (telegram_token and telegram_chat):
         return None
 
     def _post():
         try:
-            r = http().post(hook, json=payload(hook, event, data), timeout=15)
-            if r.status_code >= 400:
-                log.warning("Notification webhook answered HTTP %s", r.status_code)
+            if hook:
+                r = http().post(hook, json=payload(hook, event, data), timeout=15)
+                if r.status_code >= 400:
+                    log.warning("Notification webhook answered HTTP %s", r.status_code)
+            if telegram_token and telegram_chat:
+                text = message(event, data.get("title", ""), url=data.get("url", ""),
+                               detail=data.get("detail", ""))
+                r = http().post(f"https://api.telegram.org/bot{telegram_token}/sendMessage",
+                                json={"chat_id": telegram_chat, "text": text[:4000],
+                                      "disable_web_page_preview": True}, timeout=15)
+                if r.status_code >= 400:
+                    log.warning("Telegram notification answered HTTP %s", r.status_code)
         except Exception as e:
             log.warning("Notification failed: %s", redact(e))
 
