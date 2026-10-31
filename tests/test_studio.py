@@ -408,4 +408,34 @@ def test_new_settings_default_to_local_render_only():
     from purffle_shorts.config import Settings
     assert Settings().upload is False
     assert Settings().max_uploads_24h == 2
+def test_scheduler_recovers_claimed_idea_after_restart(server, monkeypatch):
+    app, _ = server
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    idea_id = app.studio.history.add_idea("Recover this Short", approved=True)
+    claimed = app.studio.history.claim_idea(idea_id)
+    assert claimed["status"] == "pending"  # returned snapshot predates the claim update
+    app.studio.history.set_meta("studio_automation", json.dumps({
+        "enabled": True, "plan_time": "00:00", "timezone": "Asia/Kolkata", "ideas_per_run": 5,
+        "auto_approve_ideas": False, "auto_produce": True, "auto_publish": False, "auto_sync_stats": False,
+        "last_run": today, "last_status": "done", "last_production_run": today,
+        "last_production_status": "queued", "last_production_idea_id": idea_id,
+    }))
+    class OnePass:
+        calls = 0
+        def wait(self, _seconds):
+            self.calls += 1
+            return self.calls > 1
+    app._scheduler_stop = OnePass()
+    queued = []
+    class StubJob:
+        id = 456
+    monkeypatch.setattr(app, "submit", lambda kind, params, label="": (
+        queued.append((kind, params, label)) or StubJob()))
+    app._scheduler_loop()
+    assert queued and queued[0][0] == "make_idea"
+    assert queued[0][1]["idea_id"] == idea_id
+    recovered = app.studio.history.get_idea(idea_id)
+    assert recovered["status"] == "pending" and recovered["approved"] == 1
 
