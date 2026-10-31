@@ -480,3 +480,35 @@ def test_scheduler_retries_failed_production_after_cooldown(server, monkeypatch)
     assert state["last_production_status"] == "queued"
     assert state["last_production_attempts"] == 1
     assert state["last_production_retry_at"] is None
+
+def test_scheduler_does_not_retry_after_two_failed_attempts(server, monkeypatch):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    app, _ = server
+    tz = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(tz)
+    today = now.date().isoformat()
+    idea_id = app.studio.history.add_idea("Do not retry this Short again", approved=True)
+    app.studio.history.set_meta("studio_automation", json.dumps({
+        "enabled": True, "plan_time": "00:00", "timezone": "Asia/Kolkata", "ideas_per_run": 5,
+        "auto_approve_ideas": False, "auto_produce": True, "auto_publish": False, "auto_sync_stats": False,
+        "last_run": today, "last_status": "done", "last_production_run": today,
+        "last_production_status": "failed", "last_production_idea_id": idea_id,
+        "last_production_attempts": 2,
+        "last_production_retry_at": (now - timedelta(minutes=1)).isoformat(timespec="seconds"),
+    }))
+
+    class OnePass:
+        calls = 0
+        def wait(self, _seconds):
+            self.calls += 1
+            return self.calls > 1
+
+    app._scheduler_stop = OnePass()
+    queued = []
+    monkeypatch.setattr(app, "submit", lambda *args, **kwargs: queued.append((args, kwargs)))
+    app._scheduler_loop()
+
+    assert not any(args and args[0] == "make_idea" for args, _ in queued)
+    assert app.studio.history.get_idea(idea_id)["status"] == "pending"
