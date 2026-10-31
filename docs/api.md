@@ -51,7 +51,9 @@ outcome. For a video that is `{"ok": true, "id": 12, "title": "…", "status": "
 | `POST /api/plan` | `count`, `niche` | Add AI-planned ideas to the queue (job). |
 | `POST /api/upload/<id>` | | Publish or schedule a rendered video to YouTube and the networks in `PUBLISH_TO` (job). Sending it again only retries what didn't go out; `metadata.json` (`GET /api/videos/<id>`) has each network's result under `published`. |
 | `POST /api/jobs/<id>/cancel` | | Cancel a queued job, or stop the running one. |
-| `POST /api/ideas` | `subject`, `style`, `notes` | Queue an idea. |
+| `POST /api/ideas` | `subject`, `style`, `notes` | Add an idea to the review queue; it is not production-eligible until approved. |
+| `POST /api/ideas/<id>/approve` | | Approve a pending idea for production. |
+| `POST /api/ideas/<id>/make` | | Queue production of that specific approved idea (local render only). |
 | `POST /api/ideas/<id>/delete` | | Remove an idea. |
 | `POST /api/videos/<id>/delete` | | Remove a video from the library and delete its folder (never touches YouTube). |
 | `POST /api/stats` | | Refresh YouTube view counts (job). |
@@ -60,7 +62,8 @@ outcome. For a video that is `{"ok": true, "id": 12, "title": "…", "status": "
 | `GET /api/videos` | `?status=rendered&q=octopus` | The library. |
 | `GET /api/videos/<id>` | | One video with its metadata and script. |
 | `GET /files/<id>/<name>` | `?download=1` | `short.mp4` (or `video.mp4` for 16:9), `cover.jpg`, `captions.srt`, `metadata.json`, `script.json`. |
-| `GET /api/info` · `/api/options` · `/api/doctor` · `/api/channel` · `/api/ideas` · `/api/voices?lang=es` | | Settings summary, form choices (including background videos), self-check, channel stats, idea queue, voices. |
+| `GET /api/info` · `/api/options` · `/api/doctor` · `/api/channel` · `/api/ideas` · `/api/automation` · `/api/setup` · `/api/voices?lang=es` | | Settings summary, form choices, self-check, channel stats, idea queue, automation state, safe setup readiness, voices. |
+| `POST /api/automation` | `enabled`, `plan_time`, `timezone`, `ideas_per_run`, `auto_approve_ideas`, `auto_produce`, `auto_publish`, `auto_sync_stats` | Save local daily automation settings. Auto-publish requires both the Setup upload switch and YouTube OAuth. |
 
 ### `POST /api/make` fields
 
