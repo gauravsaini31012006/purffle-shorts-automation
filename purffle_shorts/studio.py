@@ -588,6 +588,8 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                 return self._json(app.info())
             if path == "/api/options":
                 return self._json(app.options())
+            if path == "/api/profiles":
+                return self._json(app.profiles())
             if path == "/api/videos":
                 return self._json(app.videos(params.get("status", ""), params.get("q", "")))
             m = re.fullmatch(r"/api/videos/(\d+)", path)
@@ -678,6 +680,22 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                 return self._json({"error": "expected an object"}, 400)
             path = self.path
             h = app.studio.history
+            if path == "/api/profiles/save":
+                try:
+                    return self._json(app.save_profile(body))
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+            if path == "/api/profiles/apply":
+                try:
+                    return self._json(app.apply_profile(str(body.get("name") or "")))
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+            if path == "/api/profiles/delete":
+                try:
+                    return self._json(app.delete_profile(str(body.get("name") or "")))
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+
             if path in ("/api/make", "/api/draft"):
                 kind = "make" if path == "/api/make" else "draft"
                 label = (body.get("script") or {}).get("title") if isinstance(body.get("script"), dict) else None
