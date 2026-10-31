@@ -267,6 +267,8 @@ def test_profile_api_persists_and_applies_settings(server):
     assert data["profiles"]["Space Lab"]["provider"] == "gemini"
     assert app.settings.llm_model == "gemini-2.5-flash"
     assert app.settings.channel_name == "Space Lab TV"
+    assert app.studio.s.llm_provider == "gemini"
+    assert app.studio.s.llm_model == "gemini-2.5-flash"
     assert "profiles" in data["profiles"]["Space Lab"]["token_file"]
     assert app.settings.token_file == data["profiles"]["Space Lab"]["token_file"]
     status, _, _ = req(port, "POST", "/api/profiles/apply", {"name": "missing"}, app.token)
