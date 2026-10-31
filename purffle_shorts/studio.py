@@ -92,6 +92,15 @@ def _choice(value, allowed, default=None):
     return value if value in allowed else default
 
 
+def _flag(value) -> bool:
+    """Parse API/UI boolean values without treating the string 'false' as True."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 class StudioServer:
     def __init__(self, settings: Settings):
         from .pipeline import Studio
@@ -167,7 +176,7 @@ class StudioServer:
                 raise ValueError("Ideas per run must be a number") from None
         for key in ("auto_approve_ideas", "auto_produce", "auto_publish", "auto_sync_stats"):
             if key in payload:
-                state[key] = bool(payload[key])
+                state[key] = _flag(payload[key])
         if state["auto_publish"]:
             if not self.settings.upload:
                 raise ValueError("Enable YouTube publishing in Setup first. UPLOAD=false is a hard safety stop.")
@@ -404,7 +413,7 @@ class StudioServer:
             from .planner import plan_ideas
             niches = [p["niche"].strip()] if str(p.get("niche") or "").strip() else None
             ideas = plan_ideas(studio.llm, s, studio.history, int(p.get("count") or 10), niches,
-                               approved=bool(p.get("auto_approve")))
+                               approved=_flag(p.get("auto_approve")))
             job.result = {"ideas": len(ideas)}
             return bool(ideas)
         if job.kind == "make_idea":
@@ -424,7 +433,7 @@ class StudioServer:
                 raise
             if r.ok and r.record_id:
                 studio.history.link_idea(idea_id, r.record_id)
-                if bool(p.get("upload")) and s.upload:
+                if _flag(p.get("upload")) and s.upload:
                     try:
                         for rendered in [r, *r.variants]:
                             if rendered.ok and rendered.record_id:
@@ -441,7 +450,7 @@ class StudioServer:
         if job.kind == "clip":
             from .clipper import make_clips
             results = make_clips(studio, str(p.get("source") or ""), count=int(p.get("count") or 3),
-                                 crop=p.get("crop") or "center", upload=bool(p.get("upload")) and s.upload,
+                                 crop=p.get("crop") or "center", upload=_flag(p.get("upload")) and s.upload,
                                  min_seconds=int(p.get("min_seconds") or 20), max_seconds=int(p.get("max_seconds") or 58),
                                  brief=str(p.get("brief") or "")[:500])
             job.result = {"clips": [_result(r) for r in results]}
@@ -453,7 +462,7 @@ class StudioServer:
             langs = [x.strip().lower() for x in langs.split(",") if x.strip()]
         # UPLOAD=false in .env is a hard stop, whatever a request asks for
         r = studio.make(p.get("topic") or None, source=p.get("source") or None,
-                        upload=bool(p.get("upload")) and s.upload,
+                        upload=_flag(p.get("upload")) and s.upload,
                         style=s.style if s.style != "auto" else None, script=script, url=p.get("url") or None,
                         languages=[str(x)[:8] for x in (langs or [])][:6])
         job.result = _result(r)
@@ -690,7 +699,7 @@ class StudioServer:
                 updates[env_name] = str(value).strip()
         if "upload_enabled" in payload:
             value = payload.get("upload_enabled")
-            enabled = value if isinstance(value, bool) else str(value).strip().lower() in {"1", "true", "yes", "on"}
+            enabled = _flag(value)
             updates["UPLOAD"] = "true" if enabled else "false"
         client_json = str(payload.get("youtube_client_json") or "").strip()
         if client_json:
@@ -1043,7 +1052,7 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
 
             if path in ("/api/make", "/api/draft"):
                 kind = "make" if path == "/api/make" else "draft"
-                if kind == "make" and body.get("upload"):
+                if kind == "make" and _flag(body.get("upload")):
                     if not app.settings.upload:
                         return self._json({"error": "Uploads are disabled in Setup. Enable publishing explicitly first."}, 403)
                     if not Path(app.settings.token_file).expanduser().exists():
@@ -1054,9 +1063,9 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                              "Next idea from the queue" if body.get("source") == "queue" else "AI-picked topic"))
                 return self._json({"job": app.submit(kind, body, str(label)[:120]).id})
             if path == "/api/clip":
-                if body.get("upload") and not app.settings.upload:
+                if _flag(body.get("upload")) and not app.settings.upload:
                     return self._json({"error": "Uploads are disabled in Setup. Enable publishing explicitly first."}, 403)
-                if body.get("upload") and not Path(app.settings.token_file).expanduser().exists():
+                if _flag(body.get("upload")) and not Path(app.settings.token_file).expanduser().exists():
                     return self._json({"error": "Connect a YouTube account in Setup before uploading."}, 403)
                 if not str(body.get("source") or "").strip():
                     return self._json({"error": "give a video file path or URL"}, 400)
