@@ -27,6 +27,7 @@ def test_rolling_upload_cap_can_be_configured(monkeypatch):
     monkeypatch.setenv("MAX_PUBLIC_UPLOADS_24H", "1")
     assert Settings.from_env().max_uploads_24h == 1
 
+
 def test_rolling_upload_cap_cannot_be_raised_above_two(monkeypatch):
     monkeypatch.setenv("MAX_PUBLIC_UPLOADS_24H", "99")
     assert Settings.from_env().max_uploads_24h == 2
@@ -52,6 +53,7 @@ def test_runtime_upload_gate_hard_caps_public_uploads_at_two(tmp_path, monkeypat
 
     assert studio.upload_record(video_id) == "queued"
     assert studio.history.get(video_id)["status"] == "queued"
+
 
 def test_fresh_environment_keeps_youtube_upload_disabled(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
