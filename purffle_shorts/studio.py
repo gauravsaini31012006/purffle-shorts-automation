@@ -186,22 +186,46 @@ class StudioServer:
                 from datetime import datetime
                 from zoneinfo import ZoneInfo
                 now = datetime.now(ZoneInfo(state["timezone"]))
+                today = now.date().isoformat()
                 if now.strftime("%H:%M") < state["plan_time"]:
                     continue
-                if state.get("last_run") == now.date().isoformat():
-                    continue
-                # Persist the date before queueing: a restart cannot enqueue duplicate daily research.
-                state["last_run"] = now.date().isoformat()
-                state["last_status"] = "queued"
-                state["last_message"] = "Daily idea research queued"
-                self.studio.history.set_meta("studio_automation", json.dumps(state))
-                profile = self.profiles()["profiles"].get(self.profiles()["active"], {})
-                niche = profile.get("niche") or (self.settings.niches[0] if self.settings.niches else "")
-                self.submit("plan", {"count": state["ideas_per_run"], "niche": niche, "scheduled": True,
-                                     "auto_approve": state["auto_approve_ideas"]},
-                            "Scheduled daily idea research")
+
+                # Queue research at most once per local calendar day.
+                if state.get("last_run") != today:
+                    state["last_run"] = today
+                    state["last_status"] = "queued"
+                    state["last_message"] = "Daily idea research queued"
+                    self.studio.history.set_meta("studio_automation", json.dumps(state))
+                    profiles = self.profiles()
+                    profile = profiles["profiles"].get(profiles["active"], {})
+                    niche = profile.get("niche") or (self.settings.niches[0] if self.settings.niches else "")
+                    self.submit("plan", {"count": state["ideas_per_run"], "niche": niche, "scheduled": True,
+                                         "auto_approve": state["auto_approve_ideas"]},
+                                "Scheduled daily idea research")
+
+                # Production is checked independently of research completion. This means an idea
+                # approved later in the day can still be rendered without waiting for tomorrow.
+                if state["auto_produce"] and state.get("last_production_run") != today:
+                    with self._lock:
+                        active_production = any(
+                            j.kind == "make_idea" and j.params.get("scheduled")
+                            and j.status in ("queued", "running") for j in self.jobs.values()
+                        )
+                    if not active_production:
+                        candidate = next((idea for idea in self.studio.history.ideas("pending")
+                                          if idea.get("approved")), None)
+                        if candidate:
+                            publish = bool(state["auto_publish"] and self.settings.upload
+                                           and Path(self.settings.token_file).expanduser().exists())
+                            # Persist the date before enqueueing: no duplicate daily render after restart.
+                            state["last_production_run"] = today
+                            state["last_production_status"] = "queued"
+                            state["last_production_message"] = "Approved idea queued for production"
+                            self.studio.history.set_meta("studio_automation", json.dumps(state))
+                            self.submit("make_idea", {"idea_id": candidate["id"], "upload": publish,
+                                                      "scheduled": True}, "Scheduled daily Short")
             except Exception:
-                log.exception("Daily research scheduler failed")
+                log.exception("Daily automation scheduler failed")
 
     def changed(self) -> None:
         with self._changed:
@@ -344,21 +368,8 @@ class StudioServer:
                         state["last_status"] = job.status
                         state["last_message"] = (f"Research finished: {job.result.get('ideas', 0)} ideas"
                                                   if job.status == "done" else detail)
-                        # A successful research run may start one approved video. Newly researched ideas
-                        # remain in review unless the owner explicitly enabled auto-approval.
-                        if job.status == "done" and state["auto_produce"]:
-                            candidate = next((idea for idea in self.studio.history.ideas("pending")
-                                              if idea.get("approved")), None)
-                            if candidate:
-                                publish = bool(state["auto_publish"] and self.settings.upload
-                                               and Path(self.settings.token_file).expanduser().exists())
-                                scheduled_followup = ("make_idea", {"idea_id": candidate["id"], "upload": publish,
-                                                                             "scheduled": True}, "Scheduled daily Short")
-                                state["last_production_status"] = "queued"
-                                state["last_production_message"] = "Approved idea queued for production"
-                            else:
-                                state["last_production_status"] = "waiting_approval"
-                                state["last_production_message"] = "No approved ideas are available"
+                        # The scheduler independently polls for approved ideas, so approvals made
+                        # after research still enter today's production run.
                     elif job.kind == "make_idea":
                         state["last_production_run"] = time.strftime("%Y-%m-%d")
                         state["last_production_status"] = job.status
