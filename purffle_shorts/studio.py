@@ -365,7 +365,7 @@ class StudioServer:
                         state["last_production_message"] = detail or (
                             f"Production finished: {job.result.get('title', 'video')}" if job.status == "done"
                             else "Production failed")
-                        if state["auto_sync_stats"] and self.settings.upload:
+                        if state["auto_sync_stats"] and Path(self.settings.token_file).expanduser().exists():
                             schedule_stats = True
                     elif job.kind == "stats":
                         state["last_production_message"] = "Channel analytics refreshed" if job.status == "done" else detail
@@ -1017,12 +1017,21 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
 
             if path in ("/api/make", "/api/draft"):
                 kind = "make" if path == "/api/make" else "draft"
+                if kind == "make" and body.get("upload"):
+                    if not app.settings.upload:
+                        return self._json({"error": "Uploads are disabled in Setup. Enable publishing explicitly first."}, 403)
+                    if not Path(app.settings.token_file).expanduser().exists():
+                        return self._json({"error": "Connect a YouTube account in Setup before uploading."}, 403)
                 label = (body.get("script") or {}).get("title") if isinstance(body.get("script"), dict) else None
                 label = (label or body.get("topic") or body.get("url")
                          or ("Demo video" if body.get("offline") else
                              "Next idea from the queue" if body.get("source") == "queue" else "AI-picked topic"))
                 return self._json({"job": app.submit(kind, body, str(label)[:120]).id})
             if path == "/api/clip":
+                if body.get("upload") and not app.settings.upload:
+                    return self._json({"error": "Uploads are disabled in Setup. Enable publishing explicitly first."}, 403)
+                if body.get("upload") and not Path(app.settings.token_file).expanduser().exists():
+                    return self._json({"error": "Connect a YouTube account in Setup before uploading."}, 403)
                 if not str(body.get("source") or "").strip():
                     return self._json({"error": "give a video file path or URL"}, 400)
                 src = str(body["source"]).strip()
@@ -1062,7 +1071,9 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
             m = re.fullmatch(r"/api/upload/(\d+)", path)
             if m:
                 if not app.settings.upload:
-                    return self._json({"error": "Uploads are disabled in .env (UPLOAD=false). Enable explicitly before uploading."}, 403)
+                    return self._json({"error": "Uploads are disabled in Setup (UPLOAD=false). Enable explicitly before uploading."}, 403)
+                if not Path(app.settings.token_file).expanduser().exists():
+                    return self._json({"error": "Connect a YouTube account in Setup before uploading."}, 403)
                 rec = h.get(int(m.group(1)))
                 label = f"Upload: {rec['title']}" if rec else f"Upload #{m.group(1)}"
                 return self._json({"job": app.submit("upload", {"id": int(m.group(1))}, label).id})
