@@ -317,6 +317,9 @@ class StudioServer:
                     state["last_message"] = (job.result.get("error") if isinstance(job.result, dict) else "") or (
                         f"Research finished: {job.result.get('ideas', 0)} ideas" if job.status == "done" else job.message or job.status)
                     self.studio.history.set_meta("studio_automation", json.dumps(state))
+                    from . import notify
+                    notify.send(self.settings, "failed" if job.status != "done" else "rendered",
+                                title="Daily idea research", detail=state["last_message"])
                 self.changed()
 
     def _run(self, job: Job, studio, s: Settings, p: dict) -> bool:
