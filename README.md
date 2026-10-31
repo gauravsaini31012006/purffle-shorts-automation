@@ -674,7 +674,7 @@ For YouTube, create a **Desktop app** OAuth client in Google Cloud Console, enab
 
 ### Controlled daily automation
 
-The **Automation** page can schedule daily idea research. New ideas wait in **Ideas → Needs review** by default; approve an idea before rendering it. You can explicitly enable automatic approval of researched ideas and automatic rendering of one approved idea per day. Analytics sync can also be scheduled after production when a YouTube account is connected.
+The **Automation** page can schedule daily idea research. New ideas wait in **Ideas → Needs review** by default; approve an idea before rendering it. You can explicitly enable automatic approval of researched ideas and automatic rendering of one approved idea per day. When automatic publishing is enabled, the scheduler first retries older videos waiting in the upload queue, then handles that day's new Short. Analytics sync can also be scheduled after production when a YouTube account is connected.
 
 Publishing has two separate gates: turn on **Enable YouTube publishing** in Setup, then enable **Automatically publish finished videos** in Automation. Both are off by default. Automatic publishing also requires a connected YouTube account and is still subject to the configured daily quota and the rolling 24-hour public-upload cap. Leaving auto-approval off preserves a human editorial checkpoint; leaving auto-publish off creates local videos without making them public.
 
