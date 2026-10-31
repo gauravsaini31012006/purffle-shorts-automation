@@ -825,6 +825,8 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                 return self._json({"ok": True})
             m = re.fullmatch(r"/api/upload/(\d+)", path)
             if m:
+                if not app.settings.upload:
+                    return self._json({"error": "Uploads are disabled in .env (UPLOAD=false). Enable explicitly before uploading."}, 403)
                 rec = h.get(int(m.group(1)))
                 label = f"Upload: {rec['title']}" if rec else f"Upload #{m.group(1)}"
                 return self._json({"job": app.submit("upload", {"id": int(m.group(1))}, label).id})
