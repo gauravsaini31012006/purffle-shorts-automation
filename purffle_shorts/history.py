@@ -69,6 +69,9 @@ class History:
             for col, kind in VIDEO_COLUMNS.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE videos ADD COLUMN {col} {kind}")
+            idea_columns = {r["name"] for r in c.execute("PRAGMA table_info(ideas)")}
+            if "approved" not in idea_columns:
+                c.execute("ALTER TABLE ideas ADD COLUMN approved INTEGER NOT NULL DEFAULT 1")
 
     @contextmanager
     def _db(self) -> Iterator[sqlite3.Connection]:
@@ -172,9 +175,14 @@ class History:
             "WHERE views IS NOT NULL AND parent_id IS NULL AND COALESCE(publish_at, uploaded_at) <= ?", (cutoff,))
 
     # -- idea queue (planner) --
-    def add_idea(self, subject: str, style: str = "", notes: str = "") -> int:
-        return self._exec("INSERT INTO ideas (created_at, subject, style, notes) VALUES (?, ?, ?, ?)",
-                          (now_iso(), subject.strip(), style or None, notes or None))
+    def add_idea(self, subject: str, style: str = "", notes: str = "", approved: bool = True) -> int:
+        return self._exec("INSERT INTO ideas (created_at, subject, style, notes, approved) VALUES (?, ?, ?, ?, ?)",
+                          (now_iso(), subject.strip(), style or None, notes or None, int(bool(approved))))
+
+    def approve_idea(self, idea_id: int) -> bool:
+        with self._db() as c:
+            cur = c.execute("UPDATE ideas SET approved = 1 WHERE id = ? AND status = 'pending'", (idea_id,))
+            return cur.rowcount > 0
 
     def ideas(self, status: str | None = "pending", limit: int = 200) -> list[dict]:
         if status:
@@ -184,7 +192,7 @@ class History:
     def claim_idea(self) -> dict | None:
         """Take the oldest pending idea (atomically, so parallel workers never get the same one)."""
         with self._db() as c:
-            row = c.execute("SELECT * FROM ideas WHERE status = 'pending' ORDER BY id LIMIT 1").fetchone()
+            row = c.execute("SELECT * FROM ideas WHERE status = 'pending' AND approved = 1 ORDER BY id LIMIT 1").fetchone()
             if not row:
                 return None
             c.execute("UPDATE ideas SET status = 'used', used_at = ? WHERE id = ?", (now_iso(), row["id"]))
