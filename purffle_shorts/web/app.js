@@ -832,11 +832,11 @@ async function viewIdeas() {
       <div class="actions end"><button class="btn" id="idea-add" type="button">${I.plus}Add to queue</button></div>
     </section>
   </div>
-  <section class="card">${sh("03", "In the queue", `${data.pending.length} waiting`)}
+  <section class="card">${sh("03", "Review & production queue", `${data.pending.length} ideas · ${data.review.length} to review`)}
     ${data.pending.length ? `<div class="list">${data.pending.map(i => `
       <div class="item"><span class="ix">#${String(i.id).padStart(3, "0")}</span>
         <div class="grow"><b>${esc(i.subject)}</b>${i.notes ? `<small>${esc(i.notes)}</small>` : ""}</div><span class="chip ${i.style ? "accent" : ""}">${esc(i.style || "auto")}</span>
-        <button class="btn sm" type="button" data-make="${i.id}">${I.play}Make now</button>
+        ${i.approved ? `<span class="chip ok">Approved</span><button class="btn sm" type="button" data-make="${i.id}">${I.play}Make now</button>` : `<span class="chip">Needs review</span><button class="btn sm primary" type="button" data-approve="${i.id}">Approve</button>`}
         <button class="btn ghost sm" type="button" data-del="${i.id}" aria-label="Remove">${I.trash}</button></div>`).join("")}</div>`
       : empty("NOTHING PLANNED", "The queue is empty", "Plan some ideas with AI, or add your own.")}
   </section>
@@ -854,15 +854,10 @@ async function viewIdeas() {
     try { await post("/api/ideas", { subject: s, style: $("#idea-f").value }); viewIdeas(); refreshInfo(); } catch (e) { toast(esc(e.message), "bad"); }
   };
   main.onclick = async e => {
-    const d = e.target.closest("[data-del]"), m = e.target.closest("[data-make]");
-    if (d) { await post(`/api/ideas/${d.dataset.del}/delete`).catch(() => {}); viewIdeas(); refreshInfo(); }
-    if (m) {
-      const idea = data.pending.find(i => i.id === +m.dataset.make);
-      await post(`/api/ideas/${idea.id}/delete`).catch(() => {});
-      const topic = idea.notes ? `${idea.subject} (angle: ${idea.notes})` : idea.subject;
-      try { await post("/api/make", payload({ topic, url: "", source: "", style: idea.style || "" })); toast("Making it now — see Queue.", "info"); tick(); viewIdeas(); refreshInfo(); }
-      catch (err) { toast(esc(err.message), "bad"); }
-    }
+    const d = e.target.closest("[data-del]"), a = e.target.closest("[data-approve]"), m = e.target.closest("[data-make]");
+    if (d) { try { await post(`/api/ideas/${d.dataset.del}/delete`); viewIdeas(); refreshInfo(); } catch (err) { toast(esc(err.message), "bad"); } return; }
+    if (a) { try { await post(`/api/ideas/${a.dataset.approve}/approve`); toast("Idea approved.", "ok"); viewIdeas(); refreshInfo(); } catch (err) { toast(esc(err.message), "bad"); } return; }
+    if (m) { try { await post(`/api/ideas/${m.dataset.make}/make`); toast("Production queued — follow it in Queue.", "info"); tick(); viewIdeas(); refreshInfo(); } catch (err) { toast(esc(err.message), "bad"); } }
   };
 }
 async function refreshInfo() { try { S.info = await get("/api/info"); status(); } catch { /* ignore */ } }
