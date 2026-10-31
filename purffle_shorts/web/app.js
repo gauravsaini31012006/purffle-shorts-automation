@@ -1014,7 +1014,7 @@ async function viewProfiles() {
 
 async function viewAutomation(){
  const main=$("#main");
- const [i,j,a]=await Promise.all([get("/api/info"),get("/api/jobs"),get("/api/automation")]);
+ const [i,j,a,d]=await Promise.all([get("/api/info"),get("/api/jobs"),get("/api/automation"),get("/api/setup")]);
  if(S.view!=="automation")return;
  const active=j.filter(x=>["queued","running"].includes(x.status));
  main.innerHTML=`${head("automation","Automation","Configure daily research and monitor the production pipeline.")}<div class="kpis"><div class="kpi"><small>Queue state</small><b>${active.length?"Active":"Idle"}</b></div><div class="kpi"><small>Active jobs</small><b>${active.length}</b></div><div class="kpi"><small>Ideas waiting</small><b>${i.ideas}</b></div><div class="kpi"><small>Publishing</small><b>${i.upload?"Enabled in config":"Disabled"}</b></div></div>
@@ -1024,15 +1024,20 @@ async function viewAutomation(){
  <label>Run time (24-hour)<input name="plan_time" type="time" value="${esc(a.plan_time)}" required></label>
  <label>Timezone (IANA)<input name="timezone" value="${esc(a.timezone)}" placeholder="Asia/Kolkata" required></label>
  <label>Ideas per run<input name="ideas_per_run" type="number" min="1" max="30" value="${a.ideas_per_run}"></label>
+ <label class="check"><span>Auto-approve AI-researched ideas <small>Skips manual review for newly researched ideas.</small></span><input name="auto_approve_ideas" type="checkbox" ${a.auto_approve_ideas?"checked":""}></label>
+ <label class="check"><span>Automatically render one approved idea per day</span><input name="auto_produce" type="checkbox" ${a.auto_produce?"checked":""}></label>
+ <label class="check"><span>Automatically publish finished videos <small>Requires publishing enabled in Setup and a connected YouTube account.</small></span><input name="auto_publish" type="checkbox" ${a.auto_publish?"checked":""} ${i.upload && d.youtube_connected ? "" : "disabled"}></label>
+ <label class="check"><span>Refresh channel analytics after production</span><input name="auto_sync_stats" type="checkbox" ${a.auto_sync_stats?"checked":""}></label>
  <div class="form-actions"><button class="btn primary" type="submit">Save scheduler</button></div></form>
- <p class="hint">This scheduler researches and adds ideas to your queue once per day. It does not render, approve, or publish videos automatically. Public uploads remain subject to manual action and the upload safety settings.</p>
- <div class="check"><span>Last run</span><b>${esc(a.last_run||"Never")}</b></div><div class="check"><span>Last status</span><b>${esc(a.last_status)} · ${esc(a.last_message||"")}</b></div>
+ <p class="hint">Daily automation can research, optionally auto-approve ideas, and render one approved idea. Publishing is a separate opt-in, requires the Setup upload switch and YouTube OAuth, and still obeys the rolling upload cap. Leave auto-approval off to keep editorial review in your workflow.</p>
+ <div class="check"><span>Last research run</span><b>${esc(a.last_run||"Never")} · ${esc(a.last_status)} · ${esc(a.last_message||"")}</b></div>
+ <div class="check"><span>Last production run</span><b>${esc(a.last_production_run||"Never")} · ${esc(a.last_production_status)} · ${esc(a.last_production_message||"")}</b></div>
  </section>
  <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Live production queue</h2><button class="btn sm" id="auto-refresh">Refresh</button></header>${active.length?active.map(x=>`<div class="check"><b>#${x.id} · ${esc(x.label)}</b><span>${esc(x.stage)} · ${x.pct}% · ${esc(x.status)}</span></div>`).join(""):empty("IDLE","No active jobs","Create or plan a job in Studio.")}</section>
  <section class="card"><header class="sheet-h"><span class="n">03</span><h2>Safety gates</h2></header><div class="checks">
  <div class="check"><span>Daily idea research</span><b>Configurable</b></div><div class="check"><span>Video generation</span><b>Manual trigger</b></div><div class="check"><span>Editorial approval</span><b>Manual</b></div><div class="check"><span>YouTube publishing</span><b>Manual / disabled until connected</b></div></div></section>`;
  $("#auto-refresh").onclick=viewAutomation;
- $("#automation-form").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{await post("/api/automation",{enabled:f.has("enabled"),plan_time:f.get("plan_time"),timezone:f.get("timezone"),ideas_per_run:Number(f.get("ideas_per_run"))});toast("Automation settings saved.","ok");viewAutomation()}catch(err){toast(esc(err.message),"bad")}};
+ $("#automation-form").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{await post("/api/automation",{enabled:f.has("enabled"),plan_time:f.get("plan_time"),timezone:f.get("timezone"),ideas_per_run:Number(f.get("ideas_per_run")),auto_approve_ideas:f.has("auto_approve_ideas"),auto_produce:f.has("auto_produce"),auto_publish:f.has("auto_publish"),auto_sync_stats:f.has("auto_sync_stats")});toast("Automation settings saved.","ok");viewAutomation()}catch(err){toast(esc(err.message),"bad")}};
 }
 async function viewSystem() {
   const main = $("#main");
