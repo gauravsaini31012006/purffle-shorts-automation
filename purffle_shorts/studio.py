@@ -418,9 +418,13 @@ class StudioServer:
                     if schedule_stats:
                         self.submit("stats", {"scheduled": True}, "Scheduled channel analytics sync")
                     from . import notify
+                    notification_detail = (
+                        state["last_message"] if job.kind == "plan" else
+                        state["last_upload_flush_message"] if job.kind == "flush_uploads" else
+                        state["last_production_message"]
+                    )
                     notify.send(self.settings, "failed" if job.status != "done" else "rendered",
-                                title=job.label or "Scheduled automation", detail=state["last_message"] if job.kind == "plan"
-                                else state["last_production_message"])
+                                title=job.label or "Scheduled automation", detail=notification_detail)
                 self.changed()
 
     def _run(self, job: Job, studio, s: Settings, p: dict) -> bool:
