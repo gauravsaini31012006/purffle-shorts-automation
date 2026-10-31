@@ -189,14 +189,24 @@ class History:
             return self._all("SELECT * FROM ideas WHERE status = ? ORDER BY id LIMIT ?", (status, limit))
         return self._all("SELECT * FROM ideas ORDER BY id DESC LIMIT ?", (limit,))
 
-    def claim_idea(self) -> dict | None:
-        """Take the oldest pending idea (atomically, so parallel workers never get the same one)."""
+    def claim_idea(self, idea_id: int | None = None) -> dict | None:
+        """Atomically claim the oldest approved idea, or one explicitly selected by id."""
         with self._db() as c:
-            row = c.execute("SELECT * FROM ideas WHERE status = 'pending' AND approved = 1 ORDER BY id LIMIT 1").fetchone()
+            if idea_id is None:
+                row = c.execute(
+                    "SELECT * FROM ideas WHERE status = 'pending' AND approved = 1 ORDER BY id LIMIT 1"
+                ).fetchone()
+            else:
+                row = c.execute(
+                    "SELECT * FROM ideas WHERE id = ? AND status = 'pending' AND approved = 1", (idea_id,)
+                ).fetchone()
             if not row:
                 return None
-            c.execute("UPDATE ideas SET status = 'used', used_at = ? WHERE id = ?", (now_iso(), row["id"]))
-            return dict(row)
+            cur = c.execute(
+                "UPDATE ideas SET status = 'used', used_at = ? WHERE id = ? AND status = 'pending' AND approved = 1",
+                (now_iso(), row["id"]),
+            )
+            return dict(row) if cur.rowcount else None
 
     def link_idea(self, idea_id: int, video_id: int) -> None:
         self._exec("UPDATE ideas SET video_id = ? WHERE id = ?", (video_id, idea_id))
