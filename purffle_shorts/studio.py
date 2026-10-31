@@ -423,8 +423,17 @@ class StudioServer:
                         state["last_upload_flush_message"] if job.kind == "flush_uploads" else
                         state["last_production_message"]
                     )
-                    notify.send(self.settings, "failed" if job.status != "done" else "rendered",
-                                title=job.label or "Scheduled automation", detail=notification_detail)
+                    if job.status != "done":
+                        notify.send(self.settings, "failed", title=job.label or "Scheduled automation",
+                                    detail=notification_detail)
+                    elif job.kind == "plan":
+                        notify.send(self.settings, "scheduled", title=job.label or "Daily idea research",
+                                    detail=notification_detail)
+                    elif job.kind == "make_idea":
+                        notify.send(self.settings, "rendered", title=job.label or "Scheduled daily Short",
+                                    detail=notification_detail)
+                    # Upload success/queue notices are emitted per video by upload_record().
+                    # Stats refreshes do not need a separate success notification.
                 self.changed()
 
     def _run(self, job: Job, studio, s: Settings, p: dict) -> bool:
