@@ -35,6 +35,7 @@ def test_rolling_upload_cap_cannot_be_raised_above_two(monkeypatch):
 
 def test_runtime_upload_gate_hard_caps_public_uploads_at_two(tmp_path, monkeypatch):
     import json
+
     from purffle_shorts.pipeline import Studio
 
     settings = Settings(upload=True, max_uploads_24h=99, data_dir=str(tmp_path / "data"),
