@@ -637,9 +637,9 @@ class StudioServer:
                          if env_name in updates}
         # Keep all current runtime choices; only replace the fields explicitly edited in Setup.
         fresh = self.settings.with_overrides(**field_updates)
-        from .pipeline import Studio
         self.settings = fresh
-        self.studio = Studio(fresh)
+        self.studio.s = fresh
+        self.studio._llm = None
         # If the active profile exists, keep its provider/model in sync with Setup edits.
         active = self.profiles()["active"]
         profile_state = self.profiles()
