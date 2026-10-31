@@ -131,10 +131,17 @@ class StudioServer:
                 "plan_time": str(state.get("plan_time") or "09:00"),
                 "timezone": str(state.get("timezone") or self.settings.timezone or "Asia/Kolkata"),
                 "ideas_per_run": max(1, min(30, int(state.get("ideas_per_run") or 8))),
+                "auto_approve_ideas": bool(state.get("auto_approve_ideas", False)),
+                "auto_produce": bool(state.get("auto_produce", False)),
+                "auto_publish": bool(state.get("auto_publish", False)),
+                "auto_sync_stats": bool(state.get("auto_sync_stats", False)),
                 "last_run": state.get("last_run"),
                 "last_status": state.get("last_status") or "idle",
                 "last_message": state.get("last_message") or "",
-                "mode": "research_only"}
+                "last_production_run": state.get("last_production_run"),
+                "last_production_status": state.get("last_production_status") or "idle",
+                "last_production_message": state.get("last_production_message") or "",
+                "mode": "review_required" if not state.get("auto_approve_ideas") else "auto_approval_enabled"}
 
     def update_automation(self, payload: dict) -> dict:
         state = self.automation_state()
@@ -158,6 +165,14 @@ class StudioServer:
                 state["ideas_per_run"] = max(1, min(30, int(payload["ideas_per_run"])))
             except (TypeError, ValueError):
                 raise ValueError("Ideas per run must be a number") from None
+        for key in ("auto_approve_ideas", "auto_produce", "auto_publish", "auto_sync_stats"):
+            if key in payload:
+                state[key] = bool(payload[key])
+        if state["auto_publish"]:
+            if not self.settings.upload:
+                raise ValueError("Enable YouTube publishing in Setup first. UPLOAD=false is a hard safety stop.")
+            if not Path(self.settings.token_file).expanduser().exists():
+                raise ValueError("Connect a YouTube account before enabling automatic publishing.")
         self.studio.history.set_meta("studio_automation", json.dumps(state))
         self.changed()
         return state
@@ -182,7 +197,8 @@ class StudioServer:
                 self.studio.history.set_meta("studio_automation", json.dumps(state))
                 profile = self.profiles()["profiles"].get(self.profiles()["active"], {})
                 niche = profile.get("niche") or (self.settings.niches[0] if self.settings.niches else "")
-                self.submit("plan", {"count": state["ideas_per_run"], "niche": niche, "scheduled": True},
+                self.submit("plan", {"count": state["ideas_per_run"], "niche": niche, "scheduled": True,
+                                     "auto_approve": state["auto_approve_ideas"]},
                             "Scheduled daily idea research")
             except Exception:
                 log.exception("Daily research scheduler failed")
@@ -321,13 +337,42 @@ class StudioServer:
                 CANCEL.clear()
                 if job.params.get("scheduled"):
                     state = self.automation_state()
-                    state["last_status"] = job.status
-                    state["last_message"] = (job.result.get("error") if isinstance(job.result, dict) else "") or (
-                        f"Research finished: {job.result.get('ideas', 0)} ideas" if job.status == "done" else job.message or job.status)
+                    detail = (job.result.get("error") if isinstance(job.result, dict) else "") or job.message or job.status
+                    if job.kind == "plan":
+                        state["last_status"] = job.status
+                        state["last_message"] = (f"Research finished: {job.result.get('ideas', 0)} ideas"
+                                                  if job.status == "done" else detail)
+                        # A successful research run may start one approved video. Newly researched ideas
+                        # remain in review unless the owner explicitly enabled auto-approval.
+                        if job.status == "done" and state["auto_produce"]:
+                            candidate = next((idea for idea in self.studio.history.ideas("pending")
+                                              if idea.get("approved")), None)
+                            if candidate:
+                                publish = bool(state["auto_publish"] and self.settings.upload
+                                               and Path(self.settings.token_file).expanduser().exists())
+                                self.submit("make_idea", {"idea_id": candidate["id"], "upload": publish,
+                                                          "scheduled": True},
+                                            "Scheduled daily Short")
+                                state["last_production_status"] = "queued"
+                                state["last_production_message"] = "Approved idea queued for production"
+                            else:
+                                state["last_production_status"] = "waiting_approval"
+                                state["last_production_message"] = "No approved ideas are available"
+                    elif job.kind == "make_idea":
+                        state["last_production_run"] = time.strftime("%Y-%m-%d")
+                        state["last_production_status"] = job.status
+                        state["last_production_message"] = detail or (
+                            f"Production finished: {job.result.get('title', 'video')}" if job.status == "done"
+                            else "Production failed")
+                        if state["auto_sync_stats"] and self.settings.upload:
+                            self.submit("stats", {"scheduled": True}, "Scheduled channel analytics sync")
+                    elif job.kind == "stats":
+                        state["last_production_message"] = "Channel analytics refreshed" if job.status == "done" else detail
                     self.studio.history.set_meta("studio_automation", json.dumps(state))
                     from . import notify
                     notify.send(self.settings, "failed" if job.status != "done" else "rendered",
-                                title="Daily idea research", detail=state["last_message"])
+                                title=job.label or "Scheduled automation", detail=state["last_message"] if job.kind == "plan"
+                                else state["last_production_message"])
                 self.changed()
 
     def _run(self, job: Job, studio, s: Settings, p: dict) -> bool:
@@ -342,9 +387,29 @@ class StudioServer:
         if job.kind == "plan":
             from .planner import plan_ideas
             niches = [p["niche"].strip()] if str(p.get("niche") or "").strip() else None
-            ideas = plan_ideas(studio.llm, s, studio.history, int(p.get("count") or 10), niches)
+            ideas = plan_ideas(studio.llm, s, studio.history, int(p.get("count") or 10), niches,
+                               approved=bool(p.get("auto_approve")))
             job.result = {"ideas": len(ideas)}
             return bool(ideas)
+        if job.kind == "make_idea":
+            idea_id = int(p.get("idea_id") or 0)
+            idea = studio.history.claim_idea(idea_id)
+            if not idea:
+                raise ValueError("That idea is no longer available or has not been approved.")
+            angle = (idea.get("notes") or "").strip()
+            topic = f'{idea["subject"]} (angle: {angle})' if angle else idea["subject"]
+            try:
+                r = studio.make(topic, upload=bool(p.get("upload")) and s.upload,
+                                style=idea.get("style") or (s.style if s.style != "auto" else None))
+            except Exception:
+                studio.history.release_idea(idea_id)
+                raise
+            if r.ok and r.record_id:
+                studio.history.link_idea(idea_id, r.record_id)
+            else:
+                studio.history.release_idea(idea_id)
+            job.result = _result(r)
+            return r.ok
         if job.kind == "clip":
             from .clipper import make_clips
             results = make_clips(studio, str(p.get("source") or ""), count=int(p.get("count") or 3),
