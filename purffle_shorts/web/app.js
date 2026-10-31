@@ -829,7 +829,7 @@ async function viewIdeas() {
     <section class="card">${sh("02", "Add your own")}
       <div class="field"><label>Idea</label><input type="text" id="idea-s" placeholder="e.g. The man who survived two atomic bombs"></div>
       <div class="field"><label>Format</label><select id="idea-f">${styles.map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}</select></div>
-      <div class="actions end"><button class="btn" id="idea-add" type="button">${I.plus}Add to queue</button></div>
+      <div class="actions end"><button class="btn" id="idea-add" type="button">${I.plus}Add for review</button></div>
     </section>
   </div>
   <section class="card">${sh("03", "Review & production queue", `${data.pending.length} ideas · ${data.review.length} to review`)}
@@ -1037,7 +1037,7 @@ async function viewAutomation(){
  </section>
  <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Live production queue</h2><button class="btn sm" id="auto-refresh">Refresh</button></header>${active.length?active.map(x=>`<div class="check"><b>#${x.id} · ${esc(x.label)}</b><span>${esc(x.stage)} · ${x.pct}% · ${esc(x.status)}</span></div>`).join(""):empty("IDLE","No active jobs","Create or plan a job in Studio.")}</section>
  <section class="card"><header class="sheet-h"><span class="n">03</span><h2>Safety gates</h2></header><div class="checks">
- <div class="check"><span>Daily idea research</span><b>Configurable</b></div><div class="check"><span>Video generation</span><b>Manual trigger</b></div><div class="check"><span>Editorial approval</span><b>Manual</b></div><div class="check"><span>YouTube publishing</span><b>Manual / disabled until connected</b></div></div></section>`;
+ <div class="check"><span>Daily idea research</span><b>${a.enabled ? "Enabled" : "Off"}</b></div><div class="check"><span>Idea approval</span><b>${a.auto_approve_ideas ? "Automatic" : "Manual review"}</b></div><div class="check"><span>Daily video production</span><b>${a.auto_produce ? "One approved Short/day" : "Off"}</b></div><div class="check"><span>YouTube publishing</span><b>${a.auto_publish && i.upload && d.youtube_connected ? "Automatic (quota-limited)" : "Off / manual"}</b></div></div></section>`;
  $("#auto-refresh").onclick=viewAutomation;
  $("#automation-form").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{await post("/api/automation",{enabled:f.has("enabled"),plan_time:f.get("plan_time"),timezone:f.get("timezone"),ideas_per_run:Number(f.get("ideas_per_run")),auto_approve_ideas:f.has("auto_approve_ideas"),auto_produce:f.has("auto_produce"),auto_publish:f.has("auto_publish"),auto_sync_stats:f.has("auto_sync_stats")});toast("Automation settings saved.","ok");viewAutomation()}catch(err){toast(esc(err.message),"bad")}};
 }
