@@ -84,7 +84,7 @@ Every field is optional. Anything left out uses your `.env`.
 | `background`, `layout` | `"media/backgrounds/parkour.mp4"`, `"split"` | A video to play under the whole story: `full` (it is the picture) or `split` (footage on top). |
 | `music`, `sfx`, `emphasis` | `true` | Background music, sound effects, key words highlighted in colour. |
 | `also_langs` | `"es,hi"` | Also make translated copies. |
-| `upload` | `true` | Publish when done, to YouTube and the networks in `PUBLISH_TO` (only if `UPLOAD=true` in `.env`). `result.posts` has each network's status and link. |
+| `upload` | `true` | Publish when done; requires the Setup publishing switch and a connected YouTube OAuth token, and remains subject to configured quotas. `result.posts` has each network's status and link. |
 | `offline` | `true` | Demo mode: no keys, sample script, generated backgrounds. |
 
 ## Examples
