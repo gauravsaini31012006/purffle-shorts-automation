@@ -234,6 +234,8 @@ def test_automation_settings_are_persistent_and_validated(server):
     saved = json.loads(req(port, "GET", "/api/automation")[2])
     assert saved["enabled"] is True and saved["plan_time"] == "23:59"
     assert saved["timezone"] == "Asia/Kolkata" and saved["ideas_per_run"] == 12
+    status, _, body = req(port, "POST", "/api/automation", {"enabled": "false"}, app.token)
+    assert status == 200 and json.loads(req(port, "GET", "/api/automation")[2])["enabled"] is False
     status, _, body = req(port, "POST", "/api/automation", {"plan_time": "25:99"}, app.token)
     assert status == 400 and b"HH:MM" in body
     status, _, body = req(port, "POST", "/api/automation", {"auto_publish": True}, app.token)
@@ -290,6 +292,7 @@ def test_setup_status_never_exposes_secret_values(server):
     data = json.loads(body)
     assert "llm_api_key" not in data
     assert "openai_api_key" not in data
+    assert "telegram_bot_token" not in data and "telegram_chat_id" not in data
     assert "youtube_connected" in data
 
 
@@ -362,6 +365,7 @@ def test_setup_can_toggle_upload_without_echoing_secrets(server, tmp_path, monke
     status, _, body = req(port, "POST", "/api/setup", {"upload_enabled": False}, app.token)
     assert status == 200, body
     assert app.settings.upload is False
+    assert json.loads(req(port, "GET", "/api/automation")[2])["auto_publish"] is False
 
 def test_upload_requests_require_a_connected_youtube_account(server):
     app, port = server
