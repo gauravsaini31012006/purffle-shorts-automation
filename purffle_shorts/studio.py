@@ -239,8 +239,7 @@ class StudioServer:
                 # A queued approved idea is re-enqueued if Studio restarted before it completed.
                 if state["auto_produce"]:
                     last_idea_id = int(state.get("last_production_idea_id") or 0)
-                    recovering = (state.get("last_production_run") == today
-                                  and state["last_production_status"] == "queued" and last_idea_id > 0)
+                    recovering = (state["last_production_status"] == "queued" and last_idea_id > 0)
                     eligible_today = state.get("last_production_run") != today or recovering
                     if eligible_today:
                         with self._lock:
@@ -252,6 +251,7 @@ class StudioServer:
                         if recovering and last_idea_id not in active_idea_ids:
                             candidate = self.studio.history.get_idea(last_idea_id)
                             if candidate and candidate["status"] == "used" and candidate.get("video_id"):
+                                state["last_production_run"] = today
                                 state["last_production_status"] = "done"
                                 state["last_production_message"] = (
                                     f"Recovered completed render as video #{candidate['video_id']}"
