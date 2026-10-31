@@ -214,15 +214,15 @@ class StudioServer:
                     candidate = next((idea for idea in self.studio.history.ideas("pending")
                                       if idea.get("approved") and idea["id"] not in active_idea_ids), None)
                     if candidate:
-                            publish = bool(state["auto_publish"] and self.settings.upload
-                                           and Path(self.settings.token_file).expanduser().exists())
-                            # Persist the date before enqueueing: no duplicate daily render after restart.
-                            state["last_production_run"] = today
-                            state["last_production_status"] = "queued"
-                            state["last_production_message"] = "Approved idea queued for production"
-                            self.studio.history.set_meta("studio_automation", json.dumps(state))
-                            self.submit("make_idea", {"idea_id": candidate["id"], "upload": publish,
-                                                      "scheduled": True}, "Scheduled daily Short")
+                        publish = bool(state["auto_publish"] and self.settings.upload
+                                       and Path(self.settings.token_file).expanduser().exists())
+                        # Persist the date before enqueueing: no duplicate daily render after restart.
+                        state["last_production_run"] = today
+                        state["last_production_status"] = "queued"
+                        state["last_production_message"] = "Approved idea queued for production"
+                        self.studio.history.set_meta("studio_automation", json.dumps(state))
+                        self.submit("make_idea", {"idea_id": candidate["id"], "upload": publish,
+                                                  "scheduled": True}, "Scheduled daily Short")
             except Exception:
                 log.exception("Daily automation scheduler failed")
 
