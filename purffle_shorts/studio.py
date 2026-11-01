@@ -1170,7 +1170,7 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                     remaining -= len(chunk)
                 return self._json({"error": "request body too large"}, 413)
             raw_body = self.rfile.read(length) if length else b"{}"
-            if len(raw_body) != length:
+            if length and len(raw_body) != length:
                 self.close_connection = True
                 return self._json({"error": "incomplete request body"}, 400)
             if not hmac.compare_digest(self.headers.get("X-Studio-Token") or "", app.token):
