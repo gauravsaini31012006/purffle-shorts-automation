@@ -1151,11 +1151,32 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
         def do_POST(self):
             if not self._gate():
                 return
+            # Consume the request body before refusing an unauthenticated write.  On Windows,
+            # closing a keep-alive socket with unread request bytes can reset the connection
+            # before the client receives the 403 response (notably on Python 3.14).
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return self._json({"error": "invalid content length"}, 400)
+            if length < 0:
+                return self._json({"error": "invalid content length"}, 400)
+            if length > 512 * 1024:
+                self.close_connection = True
+                remaining = length
+                while remaining:
+                    chunk = self.rfile.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                return self._json({"error": "request body too large"}, 413)
+            raw_body = self.rfile.read(length) if length else b"{}"
+            if len(raw_body) != length:
+                self.close_connection = True
+                return self._json({"error": "incomplete request body"}, 400)
             if not hmac.compare_digest(self.headers.get("X-Studio-Token") or "", app.token):
                 return self._json({"error": "bad token"}, 403)
-            length = min(int(self.headers.get("Content-Length") or 0), 512 * 1024)
             try:
-                body = json.loads(self.rfile.read(length) or b"{}")
+                body = json.loads(raw_body)
             except json.JSONDecodeError:
                 return self._json({"error": "bad json"}, 400)
             if not isinstance(body, dict):
