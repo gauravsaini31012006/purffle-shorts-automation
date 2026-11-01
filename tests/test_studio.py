@@ -57,7 +57,9 @@ def test_other_host_names_are_refused(server):
 
 def test_writes_need_the_token(server):
     app, port = server
-    assert req(port, "POST", "/api/ideas", {"subject": "x"})[0] == 403
+    status, _, denied = req(port, "POST", "/api/ideas", {"subject": "x"})
+    assert status == 403
+    assert json.loads(denied) == {"error": "bad token"}
     status, _, body = req(port, "POST", "/api/ideas", {"subject": "Why cats purr", "style": "facts"}, app.token)
     assert status == 200
     iid = json.loads(body)["id"]
@@ -575,3 +577,10 @@ def test_scheduled_stats_sync_has_its_own_status(server, monkeypatch):
     assert state["last_stats_status"] == "done"
     assert state["last_stats_message"] == "Updated 4 video(s)"
     assert state["last_production_message"] == ""
+
+
+def test_authorized_post_without_body_returns_json_error(server):
+    app, port = server
+    status, _, body = req(port, "POST", "/api/ideas", token=app.token)
+    assert status == 400
+    assert json.loads(body) == {"error": "empty idea"}
