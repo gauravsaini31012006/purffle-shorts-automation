@@ -995,7 +995,7 @@ async function viewProfiles() {
   main.innerHTML=`${head("profiles","Content profiles","Save reusable niche and production settings in your local Studio database.")}<section class="card"><div id="profile-list">Loading…</div></section>
   <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Edit profile</h2></header><form id="profile-form" class="form-grid">
   <label>Profile name<input name="name" maxlength="48" required></label><label>Niche<input name="niche" maxlength="240" required></label>
-  <label>Format<select name="style">${(S.options.styles||[]).map(x=>`<option>${esc(x)}</option>`).join("")}</select></label>
+  <label>Format<select name="style">${(Array.isArray(S.options.styles)?S.options.styles:Object.keys(S.options.styles||{})).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join("")}</select></label>
   <label>Language<input name="language" value="en" maxlength="8" required></label>
   <label>Duration<input name="duration" type="number" min="10" max="170" value="40"></label>
   <label>Aspect<select name="aspect">${(S.options.aspects||["9:16"]).map(x=>`<option>${esc(x)}</option>`).join("")}</select></label>
