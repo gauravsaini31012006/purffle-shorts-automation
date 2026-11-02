@@ -64,13 +64,36 @@ class LiveLine:
 class _Console(logging.StreamHandler):
     live: LiveLine | None = None
 
+    def __init__(self, stream=None):
+        super().__init__(stream)
+        # Windows terminals and pytest/IDE capture pipes may use legacy code pages.
+        # Keep logs readable without allowing an emoji or non-Latin title to break a job.
+        reconfigure = getattr(self.stream, "reconfigure", None)
+        if reconfigure:
+            try:
+                reconfigure(encoding="utf-8", errors="backslashreplace")
+            except (OSError, ValueError):
+                pass
+
     def emit(self, record: logging.LogRecord) -> None:
         live = _Console.live
         if live:
             live.clear()
-        super().emit(record)
-        if live:
-            live.redraw()
+        try:
+            super().emit(record)
+        except UnicodeEncodeError:
+            # Some wrapped streams reject reconfigure(); escape only unsupported glyphs.
+            try:
+                message = self.format(record) + self.terminator
+                encoding = getattr(self.stream, "encoding", None) or "ascii"
+                safe = message.encode(encoding, errors="backslashreplace").decode(encoding, errors="replace")
+                self.stream.write(safe)
+                self.flush()
+            except Exception:
+                self.handleError(record)
+        finally:
+            if live:
+                live.redraw()
 
 
 def live_line(args) -> LiveLine | None:

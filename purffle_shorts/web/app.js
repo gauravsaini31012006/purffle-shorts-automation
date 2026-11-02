@@ -63,7 +63,7 @@ const MULTI = new Set(["dialogue", "chat"]);
 const STAGES = [["topic", "Topic"], ["script", "Script"], ["review", "Review"], ["voice", "Voice"], ["footage", "Footage"],
   ["captions", "Captions"], ["render", "Render"], ["check", "Check"], ["upload", "Upload"]];
 const STATUS_CHIP = { uploaded: "ok", scheduled: "blue", rendered: "accent", queued: "", failed: "bad" };
-const VIEW_NO = { create: "01", library: "02", queue: "03", ideas: "04", clip: "05", channel: "06", system: "07" };
+const VIEW_NO = { setup: "00", create: "01", library: "02", queue: "03", ideas: "04", clip: "05", channel: "06", system: "07", profiles: "08", automation: "09", tracking: "10" };
 // The page heading: a numbered eyebrow, the title and one line of what the page is for.
 function head(view, title, text, aside = "") {
   return `<div class="page-head"><div><p class="eyebrow"><b>${VIEW_NO[view] || "00"}</b>Studio</p><h1>${title}</h1>${text ? `<p>${text}</p>` : ""}</div>${aside}</div>`;
@@ -160,6 +160,11 @@ async function boot() {
     return;
   }
   const i = S.info;
+  try {
+    const setup = await get("/api/setup");
+    if (!setup.profile_count) location.hash = "#profiles";
+    else if (!i.llm_ok && !location.hash) location.hash = "#setup";
+  } catch { /* the dashboard can still be used if setup status is temporarily unavailable */ }
   S.form = Object.assign({
     mode: "topic", topic: "", url: "", style: i.style || "auto", language: i.language, duration: i.duration,
     aspect: ["9:16", "16:9", "1:1", "4:5"].includes(i.aspect) ? i.aspect : "9:16", caption_style: i.caption_style,
@@ -193,7 +198,7 @@ function status() {
   ib.textContent = i.ideas;
 }
 
-const VIEWS = { create: viewCreate, library: viewLibrary, queue: viewQueue, ideas: viewIdeas, clip: viewClip, channel: viewChannel, system: viewSystem };
+const VIEWS = { setup: viewSetup, create: viewCreate, library: viewLibrary, queue: viewQueue, ideas: viewIdeas, clip: viewClip, channel: viewChannel, system: viewSystem, profiles: viewProfiles, automation: viewAutomation, tracking: viewTracking };
 function route() {
   const v = (location.hash || "#create").slice(1).split("/")[0];
   S.view = VIEWS[v] ? v : "create";
@@ -814,7 +819,7 @@ async function viewIdeas() {
   if (S.view !== "ideas") return;
   const styles = [["", "Any format"], ...FORMATS.filter(([k]) => k !== "auto").map(([k, n]) => [k, n])];
   main.innerHTML = `
-  ${head("ideas", "Ideas", "Plan a week of videos in one go. The autopilot and Create's idea queue always use these first, oldest first.")}
+  ${head("ideas", "Ideas", "Discover ideas, review them, approve the ones you want, then render them or schedule daily production.")}
   <div class="grid2">
     <section class="card">${sh("01", "Plan with AI", "uses real YouTube searches")}
       <div class="field"><label>Niche (optional)</label><input type="text" id="plan-niche" placeholder="e.g. space and the universe — blank uses your NICHES"></div>
@@ -824,14 +829,14 @@ async function viewIdeas() {
     <section class="card">${sh("02", "Add your own")}
       <div class="field"><label>Idea</label><input type="text" id="idea-s" placeholder="e.g. The man who survived two atomic bombs"></div>
       <div class="field"><label>Format</label><select id="idea-f">${styles.map(([k, n]) => `<option value="${k}">${n}</option>`).join("")}</select></div>
-      <div class="actions end"><button class="btn" id="idea-add" type="button">${I.plus}Add to queue</button></div>
+      <div class="actions end"><button class="btn" id="idea-add" type="button">${I.plus}Add for review</button></div>
     </section>
   </div>
-  <section class="card">${sh("03", "In the queue", `${data.pending.length} waiting`)}
+  <section class="card">${sh("03", "Review & production queue", `${data.pending.length} ideas · ${data.review.length} to review`)}
     ${data.pending.length ? `<div class="list">${data.pending.map(i => `
       <div class="item"><span class="ix">#${String(i.id).padStart(3, "0")}</span>
         <div class="grow"><b>${esc(i.subject)}</b>${i.notes ? `<small>${esc(i.notes)}</small>` : ""}</div><span class="chip ${i.style ? "accent" : ""}">${esc(i.style || "auto")}</span>
-        <button class="btn sm" type="button" data-make="${i.id}">${I.play}Make now</button>
+        ${i.approved ? `<span class="chip ok">Approved</span><button class="btn sm" type="button" data-make="${i.id}">${I.play}Make now</button>` : `<span class="chip">Needs review</span><button class="btn sm primary" type="button" data-approve="${i.id}">Approve</button>`}
         <button class="btn ghost sm" type="button" data-del="${i.id}" aria-label="Remove">${I.trash}</button></div>`).join("")}</div>`
       : empty("NOTHING PLANNED", "The queue is empty", "Plan some ideas with AI, or add your own.")}
   </section>
@@ -849,15 +854,10 @@ async function viewIdeas() {
     try { await post("/api/ideas", { subject: s, style: $("#idea-f").value }); viewIdeas(); refreshInfo(); } catch (e) { toast(esc(e.message), "bad"); }
   };
   main.onclick = async e => {
-    const d = e.target.closest("[data-del]"), m = e.target.closest("[data-make]");
-    if (d) { await post(`/api/ideas/${d.dataset.del}/delete`).catch(() => {}); viewIdeas(); refreshInfo(); }
-    if (m) {
-      const idea = data.pending.find(i => i.id === +m.dataset.make);
-      await post(`/api/ideas/${idea.id}/delete`).catch(() => {});
-      const topic = idea.notes ? `${idea.subject} (angle: ${idea.notes})` : idea.subject;
-      try { await post("/api/make", payload({ topic, url: "", source: "", style: idea.style || "" })); toast("Making it now — see Queue.", "info"); tick(); viewIdeas(); refreshInfo(); }
-      catch (err) { toast(esc(err.message), "bad"); }
-    }
+    const d = e.target.closest("[data-del]"), a = e.target.closest("[data-approve]"), m = e.target.closest("[data-make]");
+    if (d) { try { await post(`/api/ideas/${d.dataset.del}/delete`); viewIdeas(); refreshInfo(); } catch (err) { toast(esc(err.message), "bad"); } return; }
+    if (a) { try { await post(`/api/ideas/${a.dataset.approve}/approve`); toast("Idea approved.", "ok"); viewIdeas(); refreshInfo(); } catch (err) { toast(esc(err.message), "bad"); } return; }
+    if (m) { try { await post(`/api/ideas/${m.dataset.make}/make`); toast("Production queued — follow it in Queue.", "info"); tick(); viewIdeas(); refreshInfo(); } catch (err) { toast(esc(err.message), "bad"); } }
   };
 }
 async function refreshInfo() { try { S.info = await get("/api/info"); status(); } catch { /* ignore */ } }
@@ -936,19 +936,115 @@ async function viewChannel() {
     <div class="kpi"><small>Total views</small><b>${fmtNum(i.views)}</b></div>
     <div class="kpi"><small>Ideas queued</small><b>${fmtNum(i.ideas)}</b></div>
   </div>
+  ${ch.summary ? `<div class="kpis"><div class="kpi"><small>Avg. views / video</small><b>${fmtNum(ch.summary.avg_views)}</b></div><div class="kpi"><small>Likes</small><b>${fmtNum(ch.summary.likes)}</b></div><div class="kpi"><small>Comments</small><b>${fmtNum(ch.summary.comments)}</b></div><div class="kpi"><small>Engagement</small><b>${ch.summary.engagement_rate}%</b></div></div>` : ""}
   ${ch.calibration && ch.calibration.videos ? calibrationCard(ch.calibration) : ""}
   ${ch.videos.length ? `<div class="grid2">
     <section class="card">${sh("03", "Average views by format")}${ch.by_style.map(s => `<div class="hbar"><span>${esc(s.style)}</span><span class="track"><i data-w="${100 * s.avg_views / top}"></i></span><span class="num">${fmtNum(s.avg_views)}</span></div>`).join("")}</section>
     <section class="card">${sh("04", "Best performer")}${(() => { const v = ch.videos[0]; return `<h3>${esc(v.title)}</h3><p class="muted">${fmtNum(v.views)} views · ${fmtNum(v.likes)} likes · ${esc(v.style || "")}</p><button class="btn sm" type="button" data-open="${v.id}">${I.play}Open</button>`; })()}</section>
   </div>
-  <section class="card">${sh("05", "Videos")}<table><thead><tr><th>Title</th><th>Format</th><th class="num">Score</th><th class="num">Views</th><th class="num">Likes</th></tr></thead>
-    <tbody>${ch.videos.map(v => `<tr><td><a href="#library" data-open="${v.id}">${esc(v.title)}</a></td><td>${esc(v.style || "")}</td><td class="num">${v.score ?? "–"}</td><td class="num">${fmtNum(v.views)}</td><td class="num">${fmtNum(v.likes)}</td></tr>`).join("")}</tbody></table></section>`
+  <section class="card">${sh("05", "Videos")}<table><thead><tr><th>Title</th><th>Format</th><th class="num">Score</th><th class="num">Views</th><th class="num">Likes</th><th class="num">Engagement</th></tr></thead>
+    <tbody>${ch.videos.map(v => `<tr><td><a href="#library" data-open="${v.id}">${esc(v.title)}</a></td><td>${esc(v.style || "")}</td><td class="num">${v.score ?? "–"}</td><td class="num">${fmtNum(v.views)}</td><td class="num">${fmtNum(v.likes)}</td><td class="num">${v.engagement_rate}%</td></tr>`).join("")}</tbody></table></section>`
     : empty("NO DATA YET", "No stats yet", "Publish some videos, then refresh. View counts need a day or two to mean something.")}`;
   paint(main);
   $("#sync").onclick = async () => { try { await post("/api/stats"); toast("Refreshing stats…", "info"); tick(); } catch (e) { toast(esc(e.message), "bad"); } };
 }
 
 // ------------------------------------------------------------------ SYSTEM
+async function viewTracking(){
+ const main=$("#main"),[videos,jobs]=await Promise.all([get("/api/videos"),get("/api/jobs")]);if(S.view!=="tracking")return;
+ const total=videos.length,failed=videos.filter(v=>v.status==="failed").length,ready=videos.filter(v=>["rendered","queued"].includes(v.status)).length,live=videos.filter(v=>["uploaded","scheduled"].includes(v.status)).length;
+ const rows=videos.map(v=>"<tr><td><a href=\"#library\" data-open=\""+v.id+"\">"+esc(v.title||"Untitled")+"</a></td><td>"+esc(v.status)+"</td><td>"+esc(v.style||"—")+"</td><td>"+esc(ago(v.created))+"</td><td>"+(v.views==null?"—":fmtNum(v.views))+"</td><td>"+(v.likes==null?"—":fmtNum(v.likes))+"</td></tr>").join("");
+ main.innerHTML=head("tracking","Production tracking","Follow every video from creation through publishing and performance sync.")+"<div class=\"kpis\"><div class=\"kpi\"><small>Tracked videos</small><b>"+total+"</b></div><div class=\"kpi\"><small>Ready / queued</small><b>"+ready+"</b></div><div class=\"kpi\"><small>Uploaded / scheduled</small><b>"+live+"</b></div><div class=\"kpi\"><small>Failed</small><b>"+failed+"</b></div></div><section class=\"card\"><header class=\"sheet-h\"><span class=\"n\">01</span><h2>Video lifecycle</h2><button class=\"btn sm\" id=\"track-refresh\">Refresh</button></header>"+(videos.length?"<table><thead><tr><th>Video</th><th>State</th><th>Format</th><th>Created</th><th>Views</th><th>Likes</th></tr></thead><tbody>"+rows+"</tbody></table>":empty("NO VIDEOS","Nothing to track yet","Rendered videos will appear here."))+"</section><section class=\"card\"><header class=\"sheet-h\"><span class=\"n\">02</span><h2>Recent job activity</h2></header>"+jobs.slice(0,12).map(j=>"<div class=\"check\"><b>#"+j.id+" · "+esc(j.label)+"</b><span>"+esc(j.kind)+" · "+esc(j.status)+" · "+j.pct+"%</span></div>").join("")+"</section>";
+ $("#track-refresh").onclick=viewTracking;
+}
+async function viewSetup() {
+  const main=$("#main");
+  const d=await get("/api/setup");
+  if(S.view!=="setup")return;
+  const state=(ok,label)=>`<div class="check"><span>${label}</span><b>${ok?"Connected / ready":"Not configured"}</b></div>`;
+  main.innerHTML=`${head("setup","Welcome to PurffleShorts","Create your creator workspace, connect the services you choose, and update them whenever your setup changes.") }
+  <section class="card"><header class="sheet-h"><span class="n">01</span><h2>Your workspace</h2></header>
+  <p class="hint">Start by creating a named creator profile under Profiles. Each profile can keep its own niche, channel identity, LLM provider/model and production preferences.</p>
+  <div class="actions"><a class="btn primary" href="#profiles">Create creator profile</a></div></section>
+  <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Connect your services</h2></header>
+  <div class="checks">${state(d.llm_key_set,"LLM API credential")}${state(d.pexels_key_set,"Pexels visuals")}${state(d.pixabay_key_set,"Pixabay visuals")}${state(d.elevenlabs_key_set,"ElevenLabs voice")}${state(d.youtube_client_file,"Google OAuth client file")}${state(d.youtube_connected,"YouTube account")}${state(d.telegram_configured,"Telegram notifications")}</div>
+  <form id="setup-form" class="form-grid">
+  <label>LLM provider<select name="llm_provider">${(S.options.providers||[]).map(x=>`<option value="${esc(x.name)}" ${x.name===(d.llm_provider||"auto")?"selected":""}>${esc(x.label||x.name)}</option>`).join("")}<option value="auto" ${(d.llm_provider||"auto")==="auto"?"selected":""}>Automatic</option></select></label>
+  <label>Model<input name="llm_model" value="${esc(d.llm_model||"")}" placeholder="e.g. gemini-2.5-flash"></label>
+  <label class="wide">LLM API key<input name="llm_api_key" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved key"></label>
+  <label>OpenAI API key<input name="openai_api_key" type="password" autocomplete="new-password" placeholder="Optional"></label>
+  <label>Pexels API key<input name="pexels_api_key" type="password" autocomplete="new-password" placeholder="Optional free visuals"></label>
+  <label>Pixabay API key<input name="pixabay_api_key" type="password" autocomplete="new-password" placeholder="Optional free visuals"></label>
+  <label>ElevenLabs API key<input name="elevenlabs_api_key" type="password" autocomplete="new-password" placeholder="Optional voice"></label>
+  <label>Telegram bot token<input name="telegram_bot_token" type="password" autocomplete="new-password" placeholder="Optional completion and failure alerts"></label>
+  <label>Telegram chat ID<input name="telegram_chat_id" autocomplete="off" placeholder="Optional private chat or group ID"></label>
+  <input type="hidden" name="upload_enabled" value="false">
+  <label class="check wide"><span>Enable YouTube publishing <small>Keep disabled until you have connected and verified the correct channel.</small></span><input name="upload_enabled" type="checkbox" value="true" ${d.upload_enabled?"checked":""}></label>
+  <label class="wide">Google OAuth Desktop client JSON<textarea name="youtube_client_json" rows="5" placeholder="Paste the contents of your Google OAuth Desktop app credentials JSON. You can also place it at credentials.json yourself."></textarea></label>
+  <div class="actions wide"><button class="btn primary" type="submit">Save credentials securely on this computer</button><button class="btn" type="button" id="youtube-connect" ${d.youtube_client_file?"":"disabled"}>Connect YouTube account</button><button class="btn" type="button" id="setup-refresh">Refresh connection status</button></div>
+  </form><p class="hint">Secrets are saved only in this local installation's .env file and are never returned to the dashboard. Google OAuth tokens are stored locally. Keep this computer private; do not share .env, credentials.json or token.json. YouTube publishing is off by default. Turn it on here only after verifying the connected Google account and channel.</p>
+  <div class="check"><span>YouTube authentication</span><b>${esc(d.youtube_auth_status||"not_started")}</b></div>
+  </section>`;
+  $("#setup-form").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget),body=Object.fromEntries(f.entries());try{const result=await post("/api/setup",body);toast("Settings saved. Secret values are not displayed again.","ok");viewSetup()}catch(err){toast(esc(err.message),"bad")}};
+  $("#youtube-connect").onclick=async()=>{try{await post("/api/youtube/connect",{});toast("Google sign-in started. Complete consent in the browser window, then refresh status.","ok");}catch(err){toast(esc(err.message),"bad")}};
+  $("#setup-refresh").onclick=viewSetup;
+}
+
+async function viewProfiles() {
+  const main=$("#main");
+  main.innerHTML=`${head("profiles","Content profiles","Save reusable niche and production settings in your local Studio database.")}<section class="card"><div id="profile-list">Loading…</div></section>
+  <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Edit profile</h2></header><form id="profile-form" class="form-grid">
+  <label>Profile name<input name="name" maxlength="48" required></label><label>Niche<input name="niche" maxlength="240" required></label>
+  <label>Format<select name="style">${(Array.isArray(S.options.styles)?S.options.styles:Object.keys(S.options.styles||{})).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join("")}</select></label>
+  <label>Language<input name="language" value="en" maxlength="8" required></label>
+  <label>Duration<input name="duration" type="number" min="10" max="170" value="40"></label>
+  <label>Aspect<select name="aspect">${(S.options.aspects||["9:16"]).map(x=>`<option>${esc(x)}</option>`).join("")}</select></label>
+  <label>LLM provider<input name="provider" maxlength="40" placeholder="auto, openai, gemini, anthropic, ollama"></label>
+  <label>Model / deployment<input name="model" maxlength="120" placeholder="e.g. gemini-2.5-flash"></label>
+  <label>Channel name<input name="channel_name" maxlength="100" placeholder="Your YouTube channel name"></label>
+  <label>Target audience<input name="audience" maxlength="240" placeholder="Who should these videos serve?"></label>
+  <label>YouTube account / channel label<input name="youtube_channel" maxlength="100" placeholder="e.g. @YourChannel (for your reference)"></label>
+  <label class="wide">Visual direction<textarea name="visual_style" rows="2" maxlength="500"></textarea></label>
+  <div class="actions wide"><button class="btn primary" type="submit">Save & activate</button></div></form></section>`;
+  async function refresh(){const d=await get("/api/profiles"), rows=Object.values(d.profiles||{}), el=$("#profile-list");
+    el.innerHTML=rows.length?rows.map(p=>`<div class="check"><b>${esc(p.name)}</b><span>${esc(p.niche)} · ${esc(p.provider||"auto")}/${esc(p.model||"default")} · ${esc(p.language)} · ${p.duration}s · ${esc(p.youtube_channel||"YouTube not labelled")}</span><span class="actions"><button class="btn sm" data-use="${esc(p.name)}">Activate</button><button class="btn sm" data-edit="${esc(p.name)}">Edit</button><button class="btn sm danger" data-del="${esc(p.name)}">Delete</button></span></div>`).join(""):empty("NO PROFILES","No profiles saved","Create one below.");
+    el.querySelectorAll("[data-use]").forEach(b=>b.onclick=async()=>{try{await post("/api/profiles/apply",{name:b.dataset.use});toast("Profile activated.","ok")}catch(e){toast(esc(e.message),"bad")}});
+    el.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{const p=d.profiles[b.dataset.edit],form=$("#profile-form");Object.keys(p).forEach(k=>{if(form.elements[k])form.elements[k].value=p[k]})});
+    el.querySelectorAll("[data-del]").forEach(b=>b.onclick=async()=>{if(!confirm("Delete profile?"))return;try{await post("/api/profiles/delete",{name:b.dataset.del});refresh()}catch(e){toast(esc(e.message),"bad")}});
+  }
+  $("#profile-form").onsubmit=async e=>{e.preventDefault();try{const before=Object.keys((await get("/api/profiles")).profiles||{}).length;await post("/api/profiles/save",Object.fromEntries(new FormData(e.currentTarget).entries()));toast("Saved and activated.","ok");if(!before){location.hash="#setup";return;}refresh()}catch(err){toast(esc(err.message),"bad")}};
+  await refresh();
+}
+
+async function viewAutomation(){
+ const main=$("#main");
+ const [i,j,a,d]=await Promise.all([get("/api/info"),get("/api/jobs"),get("/api/automation"),get("/api/setup")]);
+ if(S.view!=="automation")return;
+ const active=j.filter(x=>["queued","running"].includes(x.status));
+ main.innerHTML=`${head("automation","Automation","Configure daily research, approved-idea rendering and optional YouTube publishing.")}<div class="kpis"><div class="kpi"><small>Queue state</small><b>${active.length?"Active":"Idle"}</b></div><div class="kpi"><small>Active jobs</small><b>${active.length}</b></div><div class="kpi"><small>Ideas waiting</small><b>${i.ideas}</b></div><div class="kpi"><small>Publishing</small><b>${i.upload?"Enabled in config":"Disabled"}</b></div></div>
+ <section class="card"><header class="sheet-h"><span class="n">01</span><h2>Daily research scheduler</h2></header>
+ <form id="automation-form" class="form-grid">
+ <label class="check"><span>Enable daily automation</span><input name="enabled" type="checkbox" ${a.enabled?"checked":""}></label>
+ <label>Run time (24-hour)<input name="plan_time" type="time" value="${esc(a.plan_time)}" required></label>
+ <label>Timezone (IANA)<input name="timezone" value="${esc(a.timezone)}" placeholder="Asia/Kolkata" required></label>
+ <label>Ideas per run<input name="ideas_per_run" type="number" min="1" max="30" value="${a.ideas_per_run}"></label>
+ <label class="check"><span>Auto-approve AI-researched ideas <small>Skips manual review for newly researched ideas.</small></span><input name="auto_approve_ideas" type="checkbox" ${a.auto_approve_ideas?"checked":""}></label>
+ <label class="check"><span>Automatically render one approved idea per day</span><input name="auto_produce" type="checkbox" ${a.auto_produce?"checked":""}></label>
+ <label class="check"><span>Automatically publish finished videos <small>Requires publishing enabled in Setup and a connected YouTube account.</small></span><input name="auto_publish" type="checkbox" ${a.auto_publish?"checked":""} ${i.upload && d.youtube_connected ? "" : "disabled"}></label>
+ <label class="check"><span>Refresh channel analytics after production</span><input name="auto_sync_stats" type="checkbox" ${a.auto_sync_stats?"checked":""}></label>
+ <div class="form-actions"><button class="btn primary" type="submit">Save scheduler</button></div></form>
+ <p class="hint">Daily automation can research, optionally auto-approve ideas, and render one approved idea. Publishing is a separate opt-in, requires the Setup upload switch and YouTube OAuth, and still obeys the rolling upload cap. Leave auto-approval off to keep editorial review in your workflow.</p>
+ <div class="check"><span>Last research run</span><b>${esc(a.last_run||"Never")} · ${esc(a.last_status)} · ${esc(a.last_message||"")}</b></div>
+ <div class="check"><span>Last production run</span><b>${esc(a.last_production_run||"Never")} · ${esc(a.last_production_status)} · ${a.last_production_attempts||0}/2 attempts · ${esc(a.last_production_message||"")}</b></div>
+ <div class="check"><span>Queued upload retry</span><b>${esc(a.last_upload_flush||"Never")} · ${esc(a.last_upload_flush_message||"Not scheduled")}</b></div>
+ <div class="check"><span>Last analytics sync</span><b>${esc(a.last_stats_sync||"Never")} · ${esc(a.last_stats_status||"idle")} · ${esc(a.last_stats_message||"Not scheduled")}</b></div>
+ </section>
+ <section class="card"><header class="sheet-h"><span class="n">02</span><h2>Live production queue</h2><button class="btn sm" id="auto-refresh">Refresh</button></header>${active.length?active.map(x=>`<div class="check"><b>#${x.id} · ${esc(x.label)}</b><span>${esc(x.stage)} · ${x.pct}% · ${esc(x.status)}</span></div>`).join(""):empty("IDLE","No active jobs","Create or plan a job in Studio.")}</section>
+ <section class="card"><header class="sheet-h"><span class="n">03</span><h2>Safety gates</h2></header><div class="checks">
+ <div class="check"><span>Daily idea research</span><b>${a.enabled ? "Enabled" : "Off"}</b></div><div class="check"><span>Idea approval</span><b>${a.auto_approve_ideas ? "Automatic" : "Manual review"}</b></div><div class="check"><span>Daily video production</span><b>${a.auto_produce ? "One approved Short/day" : "Off"}</b></div><div class="check"><span>YouTube publishing</span><b>${a.auto_publish && i.upload && d.youtube_connected ? "Automatic (quota-limited)" : "Off / manual"}</b></div></div></section>`;
+ $("#auto-refresh").onclick=viewAutomation;
+ $("#automation-form").onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);try{await post("/api/automation",{enabled:f.has("enabled"),plan_time:f.get("plan_time"),timezone:f.get("timezone"),ideas_per_run:Number(f.get("ideas_per_run")),auto_approve_ideas:f.has("auto_approve_ideas"),auto_produce:f.has("auto_produce"),auto_publish:f.has("auto_publish"),auto_sync_stats:f.has("auto_sync_stats")});toast("Automation settings saved.","ok");viewAutomation()}catch(err){toast(esc(err.message),"bad")}};
+}
 async function viewSystem() {
   const main = $("#main");
   main.innerHTML = `${head("system", "System", "Setup checks, settings and ways to drive PurffleShorts from other tools.")}<div id="sys">${empty("RUNNING CHECKS", "Checking your setup…", "")}</div>`;

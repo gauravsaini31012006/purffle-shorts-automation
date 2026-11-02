@@ -16,9 +16,12 @@ FONT_CANDIDATES = [
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
     """Tests never see the developer's real keys or .env settings."""
+    for key in ("TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+        monkeypatch.delenv(key, raising=False)
     for key in list(os.environ):
         if key.endswith("_API_KEY") or key.startswith(("LLM_", "ANTHROPIC_", "TTS_", "CAPTION_")) or key in (
                 "OLLAMA_HOST", "UPLOAD", "ASPECT", "RESOLUTION", "TARGET_SECONDS", "SCRIPT_REVIEW", "ALSO_LANGUAGES",
+                "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID",
                 "RSS_FEEDS", "NOTIFY_WEBHOOK", "LEARN_FROM_STATS", "PURFFLE_HOME", "KEEP_WORK", "SOUND_EFFECTS",
                 "SFX_VOLUME", "BACKGROUND_VIDEO", "BACKGROUND_LAYOUT", "SEO_KEYWORDS", "LOCALIZE_METADATA",
                 "UPLOAD_CAPTIONS", "CLIP_JUMP_CUTS", "CLIP_MAX_PAUSE", "CLIP_ZOOM", "STUDIO_TOKEN", "STUDIO_PASSWORD",

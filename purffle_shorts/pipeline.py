@@ -13,7 +13,7 @@ import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import analytics, crosspost, ffmpeg, notify, seo, sfx, topics, tts, youtube
@@ -387,7 +387,7 @@ class Studio:
         state["folder"] = folder
         work = folder / "work"
         work.mkdir(parents=True, exist_ok=True)
-        (folder / "script.json").write_text(json.dumps(script.to_dict(), indent=2, ensure_ascii=False))
+        (folder / "script.json").write_text(json.dumps(script.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
         try:
             self._step("voice", f"{s.tts_engine} voice")
             speech = self._speak(script, work, s)
@@ -497,7 +497,7 @@ class Studio:
                             for m in media + ([background] if split else [])],
                 "parent_id": parent_id, "created_at": now_iso(),
             }
-            (folder / "metadata.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+            (folder / "metadata.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
 
             rid = self.history.add_video(
                 subject=pick.subject, source=pick.source, topic=script.topic, style=script.style,
@@ -583,13 +583,26 @@ class Studio:
         to = list(dict.fromkeys(self.s.publish_to or ["youtube"]))
         folder = Path(rec["folder"])
         meta_file = folder / "metadata.json"
-        meta = json.loads(meta_file.read_text()) if meta_file.exists() else {}
+        meta = json.loads(meta_file.read_text(encoding="utf-8")) if meta_file.exists() else {}
         posted = dict(meta.get("published") or {})
         on_youtube = "youtube" in to and not rec.get("youtube_id")
         others = [p for p in to if p != "youtube" and (posted.get(p) or {}).get("status") not in crosspost.DONE]
         if not on_youtube and not others:
             log.info("Video #%d is already on %s", rid, ", ".join(to))
             return rec["status"]
+        # Hard rolling-window safety cap. Count scheduled uploads too: they already consumed an upload
+        # and are intended to become public. This deliberately errs on the safe side.
+        rolling_cap = min(2, max(1, int(self.s.max_uploads_24h)))
+        if on_youtube and self.history.youtube_uploads_last_24h(
+                (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
+        ) >= rolling_cap:
+            log.warning("Rolling 24-hour YouTube upload cap (%d) reached — video #%d queued",
+                        rolling_cap, rid)
+            self.history.update_video(rid, status="queued")
+            if result:
+                result.status = "queued"
+            notify.send(self.s, "queued", title=rec["title"], detail="rolling 24-hour upload cap reached")
+            return "queued"
         if self.quota_left() <= 0:
             log.warning("Daily upload limit (%d) reached — video #%d queued for tomorrow", self.s.daily_upload_limit, rid)
             self.history.update_video(rid, status="queued")
@@ -610,7 +623,7 @@ class Studio:
             results = crosspost.publish(self.s, Path(rec["video_path"]), meta, others, when)
             posted.update({p: r.to_dict() for p, r in results.items()})
             meta["published"] = posted
-            meta_file.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+            meta_file.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
             out = [r for r in results.values() if r.status in crosspost.DONE]
             failed = [r for r in results.values() if r.status not in crosspost.DONE]
             for r in out:
@@ -671,7 +684,7 @@ class Studio:
         status = "scheduled" if publish else "uploaded"
         publish_iso = youtube.to_rfc3339(publish) if publish else None
         self.history.update_video(rid, status=status, youtube_id=vid, uploaded_at=now_iso(), publish_at=publish_iso,
-                                  error=None)
+                                  youtube_privacy=self.s.privacy, error=None)
         when = f", goes public {publish.strftime('%a %d %b %H:%M %Z')}" if publish else ""
         log.info("%s: https://youtube.com/shorts/%s%s", status.capitalize(), vid, when)
         notify.send(self.s, status, title=rec["title"], url=f"https://youtube.com/shorts/{vid}",

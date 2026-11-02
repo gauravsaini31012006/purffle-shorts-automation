@@ -115,7 +115,7 @@ def test_keywords_and_localised_metadata_reach_the_upload(online, monkeypatch): 
     r = P.Studio(s).make("octopus hearts")
     assert r.ok, r.error
     assert "why do octopuses have three hearts" in CaptureLLM.prompts[0]
-    meta = json.loads((r.folder / "metadata.json").read_text())
+    meta = json.loads((r.folder / "metadata.json").read_text(encoding="utf-8"))
     assert meta["search_keywords"] == ["why do octopuses have three hearts"]
     es = meta["localizations"]["es"]
     assert es["title"] == "Por qué el pulpo tiene tres corazones #shorts" and "#octopus" in es["description"]

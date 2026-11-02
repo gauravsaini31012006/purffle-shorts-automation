@@ -595,6 +595,8 @@ Common options: `--source queue|search|trending|wikipedia|reddit|rss|file|niche`
 python -m purffle_shorts studio        # opens http://127.0.0.1:8765
 ```
 
+On Windows, double-click `Start-Studio.bat` from the fork folder to start Studio and open its local page. Keep the console window open while automation is running.
+
 - **Create:** topic, web page, idea queue or "surprise me"; eleven formats; language, length, aspect, voices, caption style (with a preview), grade, transitions, footage sources, a background video (full or split screen), sound effects, key-word colours, emoji, model, Script Doctor mode, extra languages, and publishing to YouTube, TikTok and Instagram.
 - **Draft, then edit:** the AI writes and reviews the script, you see the retention score and the problems it found, change any line, reorder or add scenes, switch speakers, then render exactly that script.
 - **Live progress** through topic, script, review, voice, footage, captions, render and upload, with the log.
@@ -661,6 +663,26 @@ docker build -t purffle-shorts .                  # build your own from this che
 ```
 
 Run `auth` once on your own computer so `token.json` exists in the mounted folder. For the Studio in Docker, publish the port on localhost only: `docker run --rm -it --env-file .env -v "$PWD:/work" -p 127.0.0.1:8765:8765 purffle-shorts studio --host 0.0.0.0 --no-browser`. Keep comments in `.env` on their own lines: `--env-file` reads a comment after a value as part of the value.
+
+---
+
+## First-run setup and creator profiles
+
+Open Studio and choose **Setup** to configure an installation. A creator can save a reusable profile with a niche, channel name, target audience, preferred LLM provider/model, language, format, duration, aspect ratio and visual direction. Profiles can be edited, activated or deleted later.
+
+The Setup page accepts an LLM key, optional Pexels/Pixabay/ElevenLabs keys, optional Telegram bot/chat credentials for alerts, and a Google OAuth Desktop-client JSON. Secrets are stored locally in the installation's `.env` file (with restrictive file permissions where supported); OAuth client JSON and access tokens remain local files. The dashboard returns connection readiness only and never reads secret values back into the browser. Blank key fields leave existing credentials unchanged.
+
+For YouTube, create a **Desktop app** OAuth client in Google Cloud Console, enable YouTube Data API v3, paste its downloaded JSON into Setup, save, then choose **Connect YouTube account** and complete Google's consent screen in the browser. Reconnect after changing OAuth scopes or switching Google accounts. Each saved creator profile receives its own local YouTube token file, so activating another profile can use a different Google account/channel. Reconnect that profile to switch the account it uses.
+
+### Controlled daily automation
+
+The **Automation** page can schedule daily idea research. New ideas wait in **Ideas → Needs review** by default; approve an idea before rendering it. You can explicitly enable automatic approval of researched ideas and automatic rendering of one approved idea per day. A failed scheduled render gets one automatic retry after a 15-minute cooldown; interrupted research, production and upload-queue jobs are recovered after a Studio restart. When automatic publishing is enabled, the scheduler first retries older videos waiting in the upload queue, then handles that day's new Short. Analytics sync can also be scheduled after production when a YouTube account is connected.
+
+Publishing has two separate gates: turn on **Enable YouTube publishing** in Setup, then enable **Automatically publish finished videos** in Automation. Both are off by default. Automatic publishing also requires a connected YouTube account and is subject to the configured daily quota plus a hard ceiling of **two public or scheduled YouTube uploads in any rolling 24-hour period**. The rolling ceiling cannot be raised by changing `.env`. Leaving auto-approval off preserves a human editorial checkpoint; leaving auto-publish off creates local videos without making them public.
+
+On Windows, the optional `scripts/install-windows-autostart.ps1` registers Studio to start at your next sign-in (and restarts it a few times if it exits unexpectedly). Run `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\install-windows-autostart.ps1` from the fork folder; run `powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\uninstall-windows-autostart.ps1` to remove the task. This only starts the local Studio process: the PC must be awake, the account must be signed in, and your publishing settings remain unchanged. The task does not expose Studio to your network.
+
+**Security:** this is a local single-user Studio, not a hosted multi-tenant SaaS. Do not expose it to the public internet or share its `.env`, OAuth client JSON or token files. Use a strong `STUDIO_PASSWORD` if binding beyond localhost. Credentials are stored on the machine running Studio, not encrypted by a cloud vault. YouTube publishing is off by default; connecting an account does not publish anything.
 
 ---
 

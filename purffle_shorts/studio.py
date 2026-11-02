@@ -92,11 +92,27 @@ def _choice(value, allowed, default=None):
     return value if value in allowed else default
 
 
+def _flag(value) -> bool:
+    """Parse API/UI boolean values without treating the string 'false' as True."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 class StudioServer:
     def __init__(self, settings: Settings):
         from .pipeline import Studio
         self.settings = settings
         self.studio = Studio(settings)
+        # Restore the last selected creator profile after a restart.
+        try:
+            active_profile = self.studio.history.get_meta("studio_active_profile")
+            if active_profile and active_profile != "Default":
+                self.apply_profile(active_profile)
+        except (KeyError, TypeError, ValueError):
+            log.warning("Could not restore the active creator profile")
         # STUDIO_TOKEN fixes the write token, so scripts and tools like n8n can call the API (see docs/api.md)
         self.token = os.getenv("STUDIO_TOKEN", "").strip() or secrets.token_urlsafe(24)
         self.jobs: dict[int, Job] = {}
@@ -109,6 +125,197 @@ class StudioServer:
         self._changed = threading.Condition()
         logging.getLogger().addHandler(_JobLog(self))
         threading.Thread(target=self._worker, name="studio-worker", daemon=True).start()
+        self._scheduler_stop = threading.Event()
+        self._youtube_auth_thread = None
+        threading.Thread(target=self._scheduler_loop, name="studio-scheduler", daemon=True).start()
+
+    def automation_state(self) -> dict:
+        try:
+            state = json.loads(self.studio.history.get_meta("studio_automation") or "{}")
+        except (TypeError, ValueError):
+            state = {}
+        if not isinstance(state, dict):
+            state = {}
+        return {"enabled": bool(state.get("enabled", False)),
+                "plan_time": str(state.get("plan_time") or "09:00"),
+                "timezone": str(state.get("timezone") or self.settings.timezone or "Asia/Kolkata"),
+                "ideas_per_run": max(1, min(30, int(state.get("ideas_per_run") or 8))),
+                "auto_approve_ideas": bool(state.get("auto_approve_ideas", False)),
+                "auto_produce": bool(state.get("auto_produce", False)),
+                "auto_publish": bool(state.get("auto_publish", False)),
+                "auto_sync_stats": bool(state.get("auto_sync_stats", False)),
+                "last_run": state.get("last_run"),
+                "last_status": state.get("last_status") or "idle",
+                "last_message": state.get("last_message") or "",
+                "last_production_run": state.get("last_production_run"),
+                "last_production_idea_id": state.get("last_production_idea_id"),
+                "last_production_status": state.get("last_production_status") or "idle",
+                "last_production_message": state.get("last_production_message") or "",
+                "last_production_attempts": max(0, min(2, int(state.get("last_production_attempts") or 0))),
+                "last_production_retry_at": state.get("last_production_retry_at"),
+                "last_upload_flush": state.get("last_upload_flush"),
+                "last_upload_flush_message": state.get("last_upload_flush_message") or "",
+                "last_stats_sync": state.get("last_stats_sync"),
+                "last_stats_status": state.get("last_stats_status") or "idle",
+                "last_stats_message": state.get("last_stats_message") or "",
+                "mode": "review_required" if not state.get("auto_approve_ideas") else "auto_approval_enabled"}
+
+    def update_automation(self, payload: dict) -> dict:
+        state = self.automation_state()
+        if "enabled" in payload:
+            state["enabled"] = _flag(payload["enabled"])
+        if "plan_time" in payload:
+            value = str(payload["plan_time"])
+            if not re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
+                raise ValueError("Plan time must be HH:MM (24-hour time)")
+            state["plan_time"] = value
+        if "timezone" in payload:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            value = str(payload["timezone"]).strip()[:64]
+            try:
+                ZoneInfo(value)
+            except (ZoneInfoNotFoundError, ValueError):
+                raise ValueError("Unknown IANA timezone") from None
+            state["timezone"] = value
+        if "ideas_per_run" in payload:
+            try:
+                state["ideas_per_run"] = max(1, min(30, int(payload["ideas_per_run"])))
+            except (TypeError, ValueError):
+                raise ValueError("Ideas per run must be a number") from None
+        for key in ("auto_approve_ideas", "auto_produce", "auto_publish", "auto_sync_stats"):
+            if key in payload:
+                state[key] = _flag(payload[key])
+        if state["auto_publish"]:
+            if not self.settings.upload:
+                raise ValueError("Enable YouTube publishing in Setup first. UPLOAD=false is a hard safety stop.")
+            if not Path(self.settings.token_file).expanduser().exists():
+                raise ValueError("Connect a YouTube account before enabling automatic publishing.")
+        self.studio.history.set_meta("studio_automation", json.dumps(state))
+        self.changed()
+        return state
+
+    def _scheduler_loop(self) -> None:
+        while not self._scheduler_stop.wait(15):
+            try:
+                state = self.automation_state()
+                if not state["enabled"]:
+                    continue
+                from datetime import datetime
+                from zoneinfo import ZoneInfo
+                now = datetime.now(ZoneInfo(state["timezone"]))
+                today = now.date().isoformat()
+                if now.strftime("%H:%M") < state["plan_time"]:
+                    continue
+
+                # The job queue is in memory; requeue research if a restart discarded a job
+                # after its date was saved but before the worker completed it.
+                with self._lock:
+                    active_research = any(
+                        j.kind == "plan" and j.params.get("scheduled")
+                        and j.status in ("queued", "running") for j in self.jobs.values()
+                    )
+                research_due = state.get("last_run") != today
+                research_recovery = (state.get("last_run") == today
+                                     and state["last_status"] == "queued" and not active_research)
+                if research_due or research_recovery:
+                    state["last_run"] = today
+                    state["last_status"] = "queued"
+                    state["last_message"] = ("Daily idea research queued" if research_due
+                                             else "Recovering interrupted idea research")
+                    self.studio.history.set_meta("studio_automation", json.dumps(state))
+                    profiles = self.profiles()
+                    profile = profiles["profiles"].get(profiles["active"], {})
+                    niche = profile.get("niche") or (self.settings.niches[0] if self.settings.niches else "")
+                    self.submit("plan", {"count": state["ideas_per_run"], "niche": niche, "scheduled": True,
+                                         "auto_approve": state["auto_approve_ideas"]},
+                                "Scheduled daily idea research")
+
+                # Retry previously rendered videos before creating today's new upload. This runs
+                # only when automatic publishing is enabled, preserving manual-only queues otherwise.
+                if (state["auto_publish"] and self.settings.upload
+                        and Path(self.settings.token_file).expanduser().exists()):
+                    with self._lock:
+                        active_upload_flush = any(
+                            j.kind == "flush_uploads" and j.params.get("scheduled")
+                            and j.status in ("queued", "running") for j in self.jobs.values()
+                        )
+                    flush_due = state.get("last_upload_flush") != today
+                    flush_recovery = (
+                        state.get("last_upload_flush") == today
+                        and state.get("last_upload_flush_message") == "Queued uploads retry scheduled"
+                        and not active_upload_flush
+                    )
+                    if flush_due or flush_recovery:
+                        state["last_upload_flush"] = today
+                        state["last_upload_flush_message"] = (
+                            "Queued uploads retry scheduled" if flush_due
+                            else "Recovering interrupted queued-upload retry"
+                        )
+                        self.studio.history.set_meta("studio_automation", json.dumps(state))
+                        self.submit("flush_uploads", {"scheduled": True}, "Retry queued YouTube uploads")
+
+                # Production runs independently of research completion; late approvals still run today.
+                # A queued approved idea is re-enqueued if Studio restarted before it completed.
+                if state["auto_produce"]:
+                    last_idea_id = int(state.get("last_production_idea_id") or 0)
+                    attempts = int(state.get("last_production_attempts") or 0)
+                    retry_at = state.get("last_production_retry_at")
+                    retry_due = False
+                    if (state["last_production_status"] == "failed" and last_idea_id > 0 and attempts < 2
+                            and retry_at):
+                        try:
+                            retry_due = datetime.fromisoformat(str(retry_at)) <= now
+                        except ValueError:
+                            retry_due = False
+                    recovering = (last_idea_id > 0 and (
+                        state["last_production_status"] == "queued" or retry_due
+                    ))
+                    eligible_today = state.get("last_production_run") != today or recovering
+                    if eligible_today:
+                        with self._lock:
+                            active_idea_ids = {
+                                int(j.params.get("idea_id") or 0) for j in self.jobs.values()
+                                if j.kind == "make_idea" and j.status in ("queued", "running")
+                            }
+                        candidate = None
+                        if recovering and last_idea_id not in active_idea_ids:
+                            candidate = self.studio.history.get_idea(last_idea_id)
+                            if candidate and candidate["status"] == "used" and candidate.get("video_id"):
+                                state["last_production_run"] = today
+                                state["last_production_status"] = "done"
+                                state["last_production_attempts"] = 0
+                                state["last_production_retry_at"] = None
+                                state["last_production_message"] = (
+                                    f"Recovered completed render as video #{candidate['video_id']}"
+                                )
+                                self.studio.history.set_meta("studio_automation", json.dumps(state))
+                                candidate = None
+                            elif candidate and candidate["status"] == "used":
+                                # Claimed but no video record: release it so this idea can be retried.
+                                self.studio.history.release_idea(last_idea_id)
+                                candidate = self.studio.history.get_idea(last_idea_id)
+                        elif not recovering:
+                            candidate = next((idea for idea in self.studio.history.ideas("pending")
+                                              if idea.get("approved") and idea["id"] not in active_idea_ids), None)
+                        if candidate and candidate["status"] == "pending" and candidate.get("approved"):
+                            publish = bool(state["auto_publish"] and self.settings.upload
+                                           and Path(self.settings.token_file).expanduser().exists())
+                            # Save the selected ID before enqueueing so it survives a process restart.
+                            state["last_production_run"] = today
+                            state["last_production_idea_id"] = candidate["id"]
+                            if not recovering:
+                                state["last_production_attempts"] = 0
+                            state["last_production_retry_at"] = None
+                            state["last_production_status"] = "queued"
+                            state["last_production_message"] = (
+                                "Recovering interrupted approved idea" if recovering
+                                else "Approved idea queued for production"
+                            )
+                            self.studio.history.set_meta("studio_automation", json.dumps(state))
+                            self.submit("make_idea", {"idea_id": candidate["id"], "upload": publish,
+                                                      "scheduled": True}, "Scheduled daily Short")
+            except Exception:
+                log.exception("Daily automation scheduler failed")
 
     def changed(self) -> None:
         with self._changed:
@@ -221,6 +428,12 @@ class StudioServer:
                     status = self.studio.upload_record(int(p["id"]))
                     job.result = {"status": status, "id": int(p["id"])}
                     ok = status in ("uploaded", "scheduled", "queued")
+                elif job.kind == "flush_uploads":
+                    from .pipeline import Studio
+                    worker_studio = Studio(self.settings)
+                    count = worker_studio.flush_queue()
+                    job.result = {"uploaded": count}
+                    ok = True
                 elif job.kind == "stats":
                     from .analytics import sync_stats
                     job.result = {"updated": sync_stats(self.settings, self.studio.history)}
@@ -242,6 +455,80 @@ class StudioServer:
                     job.pct = 100
                 self.current = None
                 CANCEL.clear()
+                if job.params.get("scheduled"):
+                    state = self.automation_state()
+                    schedule_stats = False
+                    detail = (job.result.get("error") if isinstance(job.result, dict) else "") or job.message or job.status
+                    if job.kind == "plan":
+                        state["last_status"] = job.status
+                        state["last_message"] = (f"Research finished: {job.result.get('ideas', 0)} ideas"
+                                                  if job.status == "done" else detail)
+                        # The scheduler independently polls for approved ideas, so approvals made
+                        # after research still enter today's production run.
+                    elif job.kind == "make_idea":
+                        from datetime import datetime, timedelta
+                        from zoneinfo import ZoneInfo
+                        finished_at = datetime.now(ZoneInfo(state["timezone"]))
+                        state["last_production_run"] = finished_at.date().isoformat()
+                        state["last_production_status"] = job.status
+                        if job.status == "failed":
+                            attempts = int(state.get("last_production_attempts") or 0) + 1
+                            state["last_production_attempts"] = min(2, attempts)
+                            if attempts < 2:
+                                retry_at = finished_at + timedelta(minutes=15)
+                                state["last_production_retry_at"] = retry_at.isoformat(timespec="seconds")
+                                retry_note = f" · retry 2/2 after {retry_at.strftime('%H:%M %Z')}"
+                            else:
+                                state["last_production_retry_at"] = None
+                                retry_note = " · automatic retry limit reached"
+                            state["last_production_message"] = (detail or "Production failed") + retry_note
+                        elif job.status == "done":
+                            state["last_production_attempts"] = 0
+                            state["last_production_retry_at"] = None
+                            state["last_production_message"] = detail or (
+                                f"Production finished: {job.result.get('title', 'video')}"
+                            )
+                        else:
+                            state["last_production_retry_at"] = None
+                            state["last_production_message"] = detail or "Production cancelled"
+                        if state["auto_sync_stats"] and Path(self.settings.token_file).expanduser().exists():
+                            schedule_stats = True
+                    elif job.kind == "flush_uploads":
+                        count = job.result.get("uploaded", 0) if isinstance(job.result, dict) else 0
+                        state["last_upload_flush_message"] = (
+                            f"Uploaded {count} queued video(s)" if job.status == "done" else detail
+                        )
+                    elif job.kind == "stats":
+                        from datetime import datetime
+                        from zoneinfo import ZoneInfo
+                        state["last_stats_sync"] = datetime.now(ZoneInfo(state["timezone"])).isoformat(timespec="seconds")
+                        state["last_stats_status"] = job.status
+                        state["last_stats_message"] = (
+                            f"Updated {job.result.get('updated', 0)} video(s)" if job.status == "done" else detail
+                        )
+                    self.studio.history.set_meta("studio_automation", json.dumps(state))
+                    # Persist state before queueing analytics so its worker cannot be overwritten
+                    # by the parent job's stale state snapshot.
+                    if schedule_stats:
+                        self.submit("stats", {"scheduled": True}, "Scheduled channel analytics sync")
+                    from . import notify
+                    notification_detail = (
+                        state["last_message"] if job.kind == "plan" else
+                        state["last_upload_flush_message"] if job.kind == "flush_uploads" else
+                        state["last_stats_message"] if job.kind == "stats" else
+                        state["last_production_message"]
+                    )
+                    if job.status != "done":
+                        notify.send(self.settings, "failed", title=job.label or "Scheduled automation",
+                                    detail=notification_detail)
+                    elif job.kind == "plan":
+                        notify.send(self.settings, "scheduled", title=job.label or "Daily idea research",
+                                    detail=notification_detail)
+                    elif job.kind == "make_idea":
+                        notify.send(self.settings, "rendered", title=job.label or "Scheduled daily Short",
+                                    detail=notification_detail)
+                    # Upload success/queue notices are emitted per video by upload_record().
+                    # Stats refreshes do not need a separate success notification.
                 self.changed()
 
     def _run(self, job: Job, studio, s: Settings, p: dict) -> bool:
@@ -256,13 +543,47 @@ class StudioServer:
         if job.kind == "plan":
             from .planner import plan_ideas
             niches = [p["niche"].strip()] if str(p.get("niche") or "").strip() else None
-            ideas = plan_ideas(studio.llm, s, studio.history, int(p.get("count") or 10), niches)
+            ideas = plan_ideas(studio.llm, s, studio.history, int(p.get("count") or 10), niches,
+                               approved=_flag(p.get("auto_approve")))
             job.result = {"ideas": len(ideas)}
             return bool(ideas)
+        if job.kind == "make_idea":
+            idea_id = int(p.get("idea_id") or 0)
+            idea = studio.history.claim_idea(idea_id)
+            if not idea:
+                raise ValueError("That idea is no longer available or has not been approved.")
+            angle = (idea.get("notes") or "").strip()
+            topic = f'{idea["subject"]} (angle: {angle})' if angle else idea["subject"]
+            try:
+                # Keep the idea ID attached to the pipeline Topic. The pipeline links it as soon as
+                # the video record is created, which makes a completed render recoverable after a restart.
+                script, pick, writer = studio.draft(topic,
+                    style=idea.get("style") or (s.style if s.style != "auto" else None))
+                pick.idea_id = idea_id
+                r = studio.produce(script, pick, writer, upload=False)
+            except Exception:
+                studio.history.release_idea(idea_id)
+                raise
+            if r.ok and r.record_id:
+                studio.history.link_idea(idea_id, r.record_id)
+                if _flag(p.get("upload")) and s.upload:
+                    try:
+                        for rendered in [r, *r.variants]:
+                            if rendered.ok and rendered.record_id:
+                                studio.upload_record(rendered.record_id, rendered)
+                    except Exception as exc:
+                        r.status, r.error = "upload-failed", str(exc)[:500]
+                        from . import notify
+                        notify.send(s, "failed", title=r.title,
+                                    detail=f"Video rendered; upload failed: {r.error}")
+            else:
+                studio.history.release_idea(idea_id)
+            job.result = _result(r)
+            return r.ok
         if job.kind == "clip":
             from .clipper import make_clips
             results = make_clips(studio, str(p.get("source") or ""), count=int(p.get("count") or 3),
-                                 crop=p.get("crop") or "center", upload=bool(p.get("upload")) and s.upload,
+                                 crop=p.get("crop") or "center", upload=_flag(p.get("upload")) and s.upload,
                                  min_seconds=int(p.get("min_seconds") or 20), max_seconds=int(p.get("max_seconds") or 58),
                                  brief=str(p.get("brief") or "")[:500])
             job.result = {"clips": [_result(r) for r in results]}
@@ -274,7 +595,7 @@ class StudioServer:
             langs = [x.strip().lower() for x in langs.split(",") if x.strip()]
         # UPLOAD=false in .env is a hard stop, whatever a request asks for
         r = studio.make(p.get("topic") or None, source=p.get("source") or None,
-                        upload=bool(p.get("upload")) and s.upload,
+                        upload=_flag(p.get("upload")) and s.upload,
                         style=s.style if s.style != "auto" else None, script=script, url=p.get("url") or None,
                         languages=[str(x)[:8] for x in (langs or [])][:6])
         job.result = _result(r)
@@ -379,6 +700,210 @@ class StudioServer:
                 "visuals": ["pexels", "pixabay", "local", "pollinations", "openai-images"],
                 "backgrounds": self.backgrounds()}
 
+    # -- reusable content profiles ---------------------------------------------------------
+    def profiles(self) -> dict:
+        try:
+            saved = json.loads(self.studio.history.get_meta("studio_profiles") or "{}")
+        except (TypeError, ValueError):
+            saved = {}
+        if not isinstance(saved, dict):
+            saved = {}
+        active = str(self.studio.history.get_meta("studio_active_profile") or "Default")
+        return {"profiles": saved, "active": active}
+
+    def save_profile(self, payload: dict) -> dict:
+        from .script import STYLES
+        name = str(payload.get("name") or "").strip()[:48]
+        if not name:
+            raise ValueError("Profile name is required")
+        niche = str(payload.get("niche") or "").strip()[:240]
+        if not niche:
+            raise ValueError("Niche is required")
+        style = _choice(payload.get("style"), STYLES, "auto")
+        language = str(payload.get("language") or self.settings.language).strip().lower()[:8]
+        if not re.fullmatch(r"[a-z]{2,3}(?:-[A-Za-z0-9]{2,4})?", language):
+            raise ValueError("Invalid language code")
+        try:
+            duration = max(10, min(170, int(payload.get("duration") or self.settings.target_seconds)))
+        except (TypeError, ValueError):
+            raise ValueError("Duration must be a number") from None
+        aspect = str(payload.get("aspect") or "9:16")
+        if aspect not in ASPECTS:
+            raise ValueError("Unsupported aspect ratio")
+        visual_style = str(payload.get("visual_style") or self.settings.visual_style).strip()[:500]
+        from .llm import PRESETS
+        provider = str(payload.get("provider") or self.settings.llm_provider).strip().lower()[:40]
+        if provider not in PRESETS and provider != "auto":
+            raise ValueError("Choose a supported LLM provider")
+        model = str(payload.get("model") or self.settings.llm_model).strip()[:120]
+        channel_name = str(payload.get("channel_name") or self.settings.channel_name).strip()[:100]
+        audience = str(payload.get("audience") or self.settings.audience).strip()[:240]
+        youtube_channel = str(payload.get("youtube_channel") or "").strip()[:100]
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:40] or "creator"
+        token_file = str(Path(self.settings.data_dir) / "profiles" / slug / "token.json")
+        profile = {"name": name, "niche": niche, "style": style, "language": language,
+                   "duration": duration, "aspect": aspect, "visual_style": visual_style,
+                   "provider": provider, "model": model, "channel_name": channel_name, "audience": audience,
+                   "youtube_channel": youtube_channel, "token_file": token_file}
+        state = self.profiles()
+        state["profiles"][name] = profile
+        self.studio.history.set_meta("studio_profiles", json.dumps(state["profiles"], ensure_ascii=False))
+        # Saving from the profile editor also selects the profile immediately, so the
+        # next Create job uses the newly saved niche and production settings.
+        return self.apply_profile(name)
+
+    def apply_profile(self, name: str) -> dict:
+        state = self.profiles()
+        profile = state["profiles"].get(str(name))
+        if not isinstance(profile, dict):
+            raise ValueError("Profile not found")
+        self.settings = self.settings.with_overrides(
+            niches=[profile["niche"]], style=profile["style"], language=profile["language"],
+            target_seconds=profile["duration"], resolution=aspect_resolution(profile["aspect"]),
+            visual_style=profile["visual_style"], llm_provider=profile.get("provider", self.settings.llm_provider),
+            llm_model=profile.get("model", self.settings.llm_model),
+            channel_name=profile.get("channel_name", self.settings.channel_name),
+            audience=profile.get("audience", self.settings.audience),
+            token_file=profile.get("token_file", self.settings.token_file))
+        # Pipeline Studio consumes Settings through .s; clear its cached LLM so provider
+        # switches take effect immediately instead of continuing to use the previous model.
+        self.studio.s = self.settings
+        self.studio._llm = None
+        self.studio.history.set_meta("studio_active_profile", str(name))
+        return {"profile": profile, "active": str(name)}
+
+    def delete_profile(self, name: str) -> dict:
+        state = self.profiles()
+        if name == "Default":
+            raise ValueError("The Default profile cannot be deleted")
+        state["profiles"].pop(name, None)
+        self.studio.history.set_meta("studio_profiles", json.dumps(state["profiles"], ensure_ascii=False))
+        if state["active"] == name:
+            self.studio.history.set_meta("studio_active_profile", "Default")
+        return self.profiles()
+
+    def setup_state(self) -> dict:
+        """Return connection readiness only; never return API keys, OAuth tokens, or secret values."""
+        s = self.settings
+        token = Path(s.token_file)
+        return {
+            "llm_provider": s.llm_provider, "llm_model": s.llm_model,
+            "llm_key_set": bool(s.llm_api_key or s.openai_api_key),
+            "pexels_key_set": bool(s.pexels_api_key), "pixabay_key_set": bool(s.pixabay_api_key),
+            "elevenlabs_key_set": bool(s.elevenlabs_api_key),
+            "youtube_client_file": Path(s.client_secrets).exists(),
+            "youtube_connected": token.exists(),
+            "youtube_auth_status": self.studio.history.get_meta("youtube_auth_status") or "not_started",
+            "upload_enabled": bool(s.upload),
+            "telegram_configured": bool(os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+                                         and os.getenv("TELEGRAM_CHAT_ID", "").strip()),
+            "privacy": s.privacy,
+            "profile_count": len(self.profiles()["profiles"]),
+        }
+
+    def connect_youtube(self) -> dict:
+        """Start the official local OAuth consent flow without blocking the Studio request."""
+        if self._youtube_auth_thread and self._youtube_auth_thread.is_alive():
+            return {"status": "authorizing"}
+        self.studio.history.set_meta("youtube_auth_status", "authorizing")
+        def run():
+            try:
+                from . import youtube
+                youtube.get_credentials(self.settings, interactive=True, extra_scopes=youtube.auth_scopes(self.settings))
+                self.studio.history.set_meta("youtube_auth_status", "connected")
+            except Exception as exc:
+                self.studio.history.set_meta("youtube_auth_status", "failed: " + str(exc)[:300])
+                log.warning("YouTube authorization failed: %s", exc)
+            self.changed()
+        self._youtube_auth_thread = threading.Thread(target=run, name="youtube-oauth", daemon=True)
+        self._youtube_auth_thread.start()
+        return {"status": "authorizing"}
+
+    def save_setup(self, payload: dict) -> dict:
+        """Save user-supplied provider credentials locally, reload settings, and never echo secrets."""
+        allowed = {
+            "LLM_PROVIDER": "llm_provider", "LLM_MODEL": "llm_model", "LLM_BASE_URL": "llm_base_url",
+            "LLM_API_KEY": "llm_api_key", "OPENAI_API_KEY": "openai_api_key",
+            "PEXELS_API_KEY": "pexels_api_key", "PIXABAY_API_KEY": "pixabay_api_key",
+            "ELEVENLABS_API_KEY": "elevenlabs_api_key",
+        }
+        updates = {}
+        for env_name, field_name in allowed.items():
+            value = payload.get(field_name)
+            if value is not None and str(value).strip():
+                updates[env_name] = str(value).strip()
+        for env_name, field_name in (("TELEGRAM_BOT_TOKEN", "telegram_bot_token"),
+                                     ("TELEGRAM_CHAT_ID", "telegram_chat_id")):
+            value = payload.get(field_name)
+            if value is not None and str(value).strip():
+                updates[env_name] = str(value).strip()
+        if "upload_enabled" in payload:
+            value = payload.get("upload_enabled")
+            enabled = _flag(value)
+            updates["UPLOAD"] = "true" if enabled else "false"
+        client_json = str(payload.get("youtube_client_json") or "").strip()
+        if client_json:
+            try:
+                parsed = json.loads(client_json)
+                client = parsed.get("installed") or parsed.get("web") or {}
+                if not client.get("client_id") or not client.get("client_secret"):
+                    raise ValueError
+            except (ValueError, TypeError, AttributeError):
+                raise ValueError("Google OAuth JSON is invalid. Use a Desktop app OAuth client JSON file.") from None
+            target = Path(self.settings.client_secrets).expanduser()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(parsed, indent=2), encoding="utf-8")
+            try:
+                os.chmod(target, 0o600)
+            except OSError:
+                pass
+        if updates:
+            env_path = Path(".env")
+            existing = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+            lines = existing.splitlines()
+            seen = set()
+            for index, line in enumerate(lines):
+                match = re.match(r"^\s*([A-Z][A-Z0-9_]*)\s*=", line)
+                if match and match.group(1) in updates:
+                    key = match.group(1)
+                    lines[index] = f"{key}={json.dumps(updates[key])}"
+                    seen.add(key)
+            for key, value in updates.items():
+                if key not in seen:
+                    lines.append(f"{key}={json.dumps(value)}")
+            temp = env_path.with_suffix(".env.tmp")
+            temp.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
+            try:
+                os.chmod(temp, 0o600)
+            except OSError:
+                pass
+            temp.replace(env_path)
+            os.environ.update(updates)
+        field_updates = {field_name: updates[env_name] for env_name, field_name in allowed.items()
+                         if env_name in updates}
+        if "UPLOAD" in updates:
+            field_updates["upload"] = updates["UPLOAD"].lower() == "true"
+            if not field_updates["upload"]:
+                automation = self.automation_state()
+                if automation["auto_publish"]:
+                    automation["auto_publish"] = False
+                    self.studio.history.set_meta("studio_automation", json.dumps(automation))
+        # Keep all current runtime choices; only replace the fields explicitly edited in Setup.
+        fresh = self.settings.with_overrides(**field_updates)
+        self.settings = fresh
+        self.studio.s = fresh
+        self.studio._llm = None
+        # If the active profile exists, keep its provider/model in sync with Setup edits.
+        active = self.profiles()["active"]
+        profile_state = self.profiles()
+        if active in profile_state["profiles"] and ({"LLM_PROVIDER", "LLM_MODEL"} & set(updates)):
+            profile_state["profiles"][active]["provider"] = fresh.llm_provider
+            profile_state["profiles"][active]["model"] = fresh.llm_model
+            self.studio.history.set_meta("studio_profiles",
+                json.dumps(profile_state["profiles"], ensure_ascii=False))
+        self.changed()
+        return self.setup_state()
+
     def backgrounds(self) -> list[dict]:
         """Background videos to offer: BACKGROUND_VIDEO (a file, or every video in that folder) and
         media/backgrounds/."""
@@ -404,11 +929,23 @@ class StudioServer:
         by_style: dict[str, list[int]] = {}
         for r in rows:
             by_style.setdefault(r["style"] or "other", []).append(r["views"])
+        total_views = sum(r.get("views") or 0 for r in rows)
+        total_likes = sum(r.get("likes") or 0 for r in rows)
+        total_comments = sum(r.get("comments") or 0 for r in rows)
         return {"videos": [{"id": r["id"], "title": r["title"], "views": r["views"], "likes": r["likes"],
                             "comments": r["comments"], "score": r.get("score"), "style": r["style"],
+                            "engagement_rate": round(100 * ((r.get("likes") or 0) + (r.get("comments") or 0)) /
+                                                     max(1, r["views"]), 2),
                             "youtube_id": r["youtube_id"]} for r in sorted(rows, key=lambda r: -r["views"])[:100]],
-                "by_style": sorted(({"style": k, "videos": len(v), "avg_views": round(sum(v) / len(v))}
+                "by_style": sorted(({"style": k, "videos": len(v), "avg_views": round(sum(v) / len(v)),
+                                     "avg_engagement_rate": round(100 * sum(
+                                         ((r.get("likes") or 0) + (r.get("comments") or 0)) / max(1, r["views"])
+                                         for r in rows if (r.get("style") or "other") == k) / len(v), 2)}
                                     for k, v in by_style.items()), key=lambda x: -x["avg_views"]),
+                "summary": {"videos_with_stats": len(rows), "views": total_views, "likes": total_likes,
+                            "comments": total_comments,
+                            "engagement_rate": round(100 * (total_likes + total_comments) / max(1, total_views), 2),
+                            "avg_views": round(total_views / len(rows)) if rows else 0},
                 "synced": max((r.get("stats_at") or "" for r in rows), default=""),
                 "calibration": calibration(self.studio.history)}
 
@@ -526,6 +1063,12 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                 return self._json(app.info())
             if path == "/api/options":
                 return self._json(app.options())
+            if path == "/api/profiles":
+                return self._json(app.profiles())
+            if path == "/api/setup":
+                return self._json(app.setup_state())
+            if path == "/api/automation":
+                return self._json(app.automation_state())
             if path == "/api/videos":
                 return self._json(app.videos(params.get("status", ""), params.get("q", "")))
             m = re.fullmatch(r"/api/videos/(\d+)", path)
@@ -540,7 +1083,10 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
             if m and int(m.group(1)) in app.jobs:
                 return self._json(app.jobs[int(m.group(1))].public(full_log=True))
             if path == "/api/ideas":
-                return self._json({"pending": app.studio.history.ideas("pending"),
+                pending = app.studio.history.ideas("pending")
+                return self._json({"pending": pending,
+                                   "review": [i for i in pending if not i.get("approved")],
+                                   "approved": [i for i in pending if i.get("approved")],
                                    "used": app.studio.history.ideas("used", 30)})
             if path == "/api/doctor":
                 from .doctor import checks
@@ -605,25 +1151,83 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
         def do_POST(self):
             if not self._gate():
                 return
+            # Consume the request body before refusing an unauthenticated write.  On Windows,
+            # closing a keep-alive socket with unread request bytes can reset the connection
+            # before the client receives the 403 response (notably on Python 3.14).
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return self._json({"error": "invalid content length"}, 400)
+            if length < 0:
+                return self._json({"error": "invalid content length"}, 400)
+            if length > 512 * 1024:
+                self.close_connection = True
+                remaining = length
+                while remaining:
+                    chunk = self.rfile.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+                return self._json({"error": "request body too large"}, 413)
+            raw_body = self.rfile.read(length) if length else b"{}"
+            if length and len(raw_body) != length:
+                self.close_connection = True
+                return self._json({"error": "incomplete request body"}, 400)
             if not hmac.compare_digest(self.headers.get("X-Studio-Token") or "", app.token):
                 return self._json({"error": "bad token"}, 403)
-            length = min(int(self.headers.get("Content-Length") or 0), 512 * 1024)
             try:
-                body = json.loads(self.rfile.read(length) or b"{}")
+                body = json.loads(raw_body)
             except json.JSONDecodeError:
                 return self._json({"error": "bad json"}, 400)
             if not isinstance(body, dict):
                 return self._json({"error": "expected an object"}, 400)
             path = self.path
             h = app.studio.history
+            if path == "/api/automation":
+                try:
+                    return self._json(app.update_automation(body))
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+            if path == "/api/setup":
+                try:
+                    return self._json(app.save_setup(body))
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+            if path == "/api/youtube/connect":
+                return self._json(app.connect_youtube())
+            if path == "/api/profiles/save":
+                try:
+                    return self._json(app.save_profile(body))
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+            if path == "/api/profiles/apply":
+                try:
+                    return self._json(app.apply_profile(str(body.get("name") or "")))
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+            if path == "/api/profiles/delete":
+                try:
+                    return self._json(app.delete_profile(str(body.get("name") or "")))
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 400)
+
             if path in ("/api/make", "/api/draft"):
                 kind = "make" if path == "/api/make" else "draft"
+                if kind == "make" and _flag(body.get("upload")):
+                    if not app.settings.upload:
+                        return self._json({"error": "Uploads are disabled in Setup. Enable publishing explicitly first."}, 403)
+                    if not Path(app.settings.token_file).expanduser().exists():
+                        return self._json({"error": "Connect a YouTube account in Setup before uploading."}, 403)
                 label = (body.get("script") or {}).get("title") if isinstance(body.get("script"), dict) else None
                 label = (label or body.get("topic") or body.get("url")
                          or ("Demo video" if body.get("offline") else
                              "Next idea from the queue" if body.get("source") == "queue" else "AI-picked topic"))
                 return self._json({"job": app.submit(kind, body, str(label)[:120]).id})
             if path == "/api/clip":
+                if _flag(body.get("upload")) and not app.settings.upload:
+                    return self._json({"error": "Uploads are disabled in Setup. Enable publishing explicitly first."}, 403)
+                if _flag(body.get("upload")) and not Path(app.settings.token_file).expanduser().exists():
+                    return self._json({"error": "Connect a YouTube account in Setup before uploading."}, 403)
                 if not str(body.get("source") or "").strip():
                     return self._json({"error": "give a video file path or URL"}, 400)
                 src = str(body["source"]).strip()
@@ -639,14 +1243,33 @@ def _handler(app: StudioServer, bound_host: str, password: str | None = None):
                 if not subject:
                     return self._json({"error": "empty idea"}, 400)
                 from .script import STYLES
-                return self._json({"id": h.add_idea(subject[:300], _choice(body.get("style"), STYLES, ""),
-                                                    str(body.get("notes") or "")[:500])})
+                idea_id = h.add_idea(subject[:300], _choice(body.get("style"), STYLES, ""),
+                                       str(body.get("notes") or "")[:500], approved=False)
+                return self._json({"id": idea_id, "status": "review"})
+            m = re.fullmatch(r"/api/ideas/(\d+)/approve", path)
+            if m:
+                ok = h.approve_idea(int(m.group(1)))
+                return self._json({"ok": ok}, 200 if ok else 404)
+            m = re.fullmatch(r"/api/ideas/(\d+)/make", path)
+            if m:
+                idea_id = int(m.group(1))
+                idea = next((i for i in h.ideas("pending") if i["id"] == idea_id), None)
+                if not idea:
+                    return self._json({"error": "idea not found"}, 404)
+                if not idea.get("approved"):
+                    return self._json({"error": "approve this idea before production"}, 409)
+                return self._json({"job": app.submit("make_idea", {"idea_id": idea_id, "upload": False},
+                                                     f"Make idea: {idea['subject'][:90]}").id})
             m = re.fullmatch(r"/api/ideas/(\d+)/delete", path)
             if m:
                 h.delete_idea(int(m.group(1)))
                 return self._json({"ok": True})
             m = re.fullmatch(r"/api/upload/(\d+)", path)
             if m:
+                if not app.settings.upload:
+                    return self._json({"error": "Uploads are disabled in Setup (UPLOAD=false). Enable explicitly before uploading."}, 403)
+                if not Path(app.settings.token_file).expanduser().exists():
+                    return self._json({"error": "Connect a YouTube account in Setup before uploading."}, 403)
                 rec = h.get(int(m.group(1)))
                 label = f"Upload: {rec['title']}" if rec else f"Upload #{m.group(1)}"
                 return self._json({"job": app.submit("upload", {"id": int(m.group(1))}, label).id})

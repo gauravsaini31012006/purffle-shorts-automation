@@ -57,7 +57,9 @@ def test_other_host_names_are_refused(server):
 
 def test_writes_need_the_token(server):
     app, port = server
-    assert req(port, "POST", "/api/ideas", {"subject": "x"})[0] == 403
+    status, _, denied = req(port, "POST", "/api/ideas", {"subject": "x"})
+    assert status == 403
+    assert json.loads(denied) == {"error": "bad token"}
     status, _, body = req(port, "POST", "/api/ideas", {"subject": "Why cats purr", "style": "facts"}, app.token)
     assert status == 200
     iid = json.loads(body)["id"]
@@ -210,3 +212,375 @@ def test_page_has_no_inline_styles_or_scripts(server):
     js = req(port, "GET", "/static/app.js")[2].decode()
     assert not re.search(r"\sstyle=", html) and not re.search(r"<script>(?!\s*</script>)", html)
     assert not re.search(r"""\sstyle=["']""", js)
+
+
+def test_upload_api_respects_upload_false(server):
+    app, port = server
+    status, _, body = req(port, "POST", "/api/upload/1", {}, app.token)
+    assert status == 403
+    assert b"UPLOAD=false" in body
+
+
+def test_automation_settings_are_persistent_and_validated(server):
+    app, port = server
+    initial = json.loads(req(port, "GET", "/api/automation")[2])
+    assert initial["enabled"] is False
+    assert initial["mode"] == "review_required"
+    assert initial["auto_approve_ideas"] is False
+    assert initial["auto_produce"] is False
+    assert initial["auto_publish"] is False
+    status, _, body = req(port, "POST", "/api/automation",
+                          {"enabled": True, "plan_time": "23:59", "timezone": "Asia/Kolkata",
+                           "ideas_per_run": 12}, app.token)
+    assert status == 200, body
+    saved = json.loads(req(port, "GET", "/api/automation")[2])
+    assert saved["enabled"] is True and saved["plan_time"] == "23:59"
+    assert saved["timezone"] == "Asia/Kolkata" and saved["ideas_per_run"] == 12
+    status, _, body = req(port, "POST", "/api/automation", {"enabled": "false"}, app.token)
+    assert status == 200 and json.loads(req(port, "GET", "/api/automation")[2])["enabled"] is False
+    status, _, body = req(port, "POST", "/api/automation", {"plan_time": "25:99"}, app.token)
+    assert status == 400 and b"HH:MM" in body
+    status, _, body = req(port, "POST", "/api/automation", {"auto_publish": True}, app.token)
+    assert status == 400 and b"UPLOAD=false" in body
+
+
+def test_rolling_upload_limit_counts_public_and_unknown_visibility(server):
+    app, _ = server
+    h = app.studio.history
+    from datetime import datetime, timedelta, timezone
+    recent = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat(timespec="seconds")
+    h.add_video(title="Public", status="uploaded", youtube_id="pub1", uploaded_at=recent,
+                youtube_privacy="public")
+    h.add_video(title="Private", status="uploaded", youtube_id="priv1", uploaded_at=recent,
+                youtube_privacy="private")
+    h.add_video(title="Legacy", status="uploaded", youtube_id="legacy1", uploaded_at=recent)
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
+    assert h.youtube_uploads_last_24h(since) == 2
+
+
+def test_profile_api_persists_and_applies_settings(server):
+    app, port = server
+    assert req(port, "GET", "/api/profiles")[0] == 200
+    payload = {"name": "Space Lab", "niche": "space science", "style": "explainer",
+               "language": "en", "duration": 55, "aspect": "9:16",
+               "visual_style": "cinematic documentary", "provider": "gemini",
+               "model": "gemini-2.5-flash", "channel_name": "Space Lab TV",
+               "audience": "curious science fans"}
+    status, _, body = req(port, "POST", "/api/profiles/save", payload, app.token)
+    assert status == 200, body
+    assert app.settings.niches == ["space science"]
+    assert app.settings.target_seconds == 55
+    data = json.loads(req(port, "GET", "/api/profiles")[2])
+    assert data["active"] == "Space Lab"
+    assert data["profiles"]["Space Lab"]["visual_style"] == "cinematic documentary"
+    assert data["profiles"]["Space Lab"]["provider"] == "gemini"
+    assert app.settings.llm_model == "gemini-2.5-flash"
+    assert app.settings.channel_name == "Space Lab TV"
+    assert app.studio.s.llm_provider == "gemini"
+    assert app.studio.s.llm_model == "gemini-2.5-flash"
+    assert "profiles" in data["profiles"]["Space Lab"]["token_file"]
+    assert app.settings.token_file == data["profiles"]["Space Lab"]["token_file"]
+    status, _, _ = req(port, "POST", "/api/profiles/apply", {"name": "missing"}, app.token)
+    assert status == 400
+    status, _, _ = req(port, "POST", "/api/profiles/delete", {"name": "Space Lab"}, app.token)
+    assert status == 200
+    assert "Space Lab" not in json.loads(req(port, "GET", "/api/profiles")[2])["profiles"]
+
+
+def test_setup_status_never_exposes_secret_values(server):
+    app, port = server
+    status, _, body = req(port, "GET", "/api/setup")
+    assert status == 200
+    data = json.loads(body)
+    assert "llm_api_key" not in data
+    assert "openai_api_key" not in data
+    assert "telegram_bot_token" not in data and "telegram_chat_id" not in data
+    assert "youtube_connected" in data
+
+
+def test_setup_saves_credentials_without_returning_secret(server, tmp_path, monkeypatch):
+    app, port = server
+    monkeypatch.chdir(tmp_path)
+    for key in ("LLM_API_KEY", "LLM_PROVIDER", "LLM_MODEL", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"):
+        monkeypatch.setenv(key, "")
+    secret = "test-secret-never-return-this"
+    telegram_token = "telegram-token-never-return-this"
+    status, _, body = req(port, "POST", "/api/setup",
+                          {"llm_provider": "gemini", "llm_model": "gemini-2.5-flash",
+                           "llm_api_key": secret, "telegram_bot_token": telegram_token,
+                           "telegram_chat_id": "123456789"}, app.token)
+    assert status == 200, body
+    assert secret.encode() not in body and telegram_token.encode() not in body
+    assert app.settings.llm_api_key == secret
+    env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "LLM_API_KEY=" in env_text and "TELEGRAM_BOT_TOKEN=" in env_text
+    state = json.loads(req(port, "GET", "/api/setup")[2])
+    assert state["llm_key_set"] is True and state["telegram_configured"] is True
+
+
+def test_ideas_require_approval_and_selected_make_uses_the_requested_id(server, monkeypatch):
+    app, port = server
+    status, _, body = req(port, "POST", "/api/ideas",
+                          {"subject": "Why the sky turns red at sunset", "style": "facts"}, app.token)
+    assert status == 200
+    iid = json.loads(body)["id"]
+    data = json.loads(req(port, "GET", "/api/ideas")[2])
+    assert [i["id"] for i in data["review"]] == [iid]
+    assert data["approved"] == []
+
+    status, _, body = req(port, "POST", f"/api/ideas/{iid}/make", {}, app.token)
+    assert status == 409 and b"approve" in body
+    status, _, body = req(port, "POST", f"/api/ideas/{iid}/approve", {}, app.token)
+    assert status == 200 and json.loads(body)["ok"] is True
+
+    captured = []
+    class Stub:
+        id = 987
+    monkeypatch.setattr(app, "submit", lambda kind, params, label="": (
+        captured.append((kind, params, label)) or Stub()))
+    status, _, body = req(port, "POST", f"/api/ideas/{iid}/make", {}, app.token)
+    assert status == 200 and json.loads(body)["job"] == 987
+    assert captured[0][0] == "make_idea"
+    assert captured[0][1]["idea_id"] == iid
+    assert captured[0][1]["upload"] is False
+
+
+def test_history_claims_only_approved_ideas_and_can_target_an_id(server):
+    h = server[0].studio.history
+    first = h.add_idea("First approved idea", approved=True)
+    second = h.add_idea("Second approved idea", approved=True)
+    review = h.add_idea("Needs a human review", approved=False)
+    assert h.claim_idea(second)["id"] == second
+    assert h.claim_idea(second) is None
+    assert h.claim_idea()["id"] == first
+    assert h.claim_idea(review) is None
+
+
+def test_setup_can_toggle_upload_without_echoing_secrets(server, tmp_path, monkeypatch):
+    app, port = server
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("UPLOAD", "false")
+    status, _, body = req(port, "POST", "/api/setup", {"upload_enabled": True}, app.token)
+    assert status == 200, body
+    assert app.settings.upload is True
+    assert json.loads(req(port, "GET", "/api/setup")[2])["upload_enabled"] is True
+    assert 'UPLOAD="true"' in (tmp_path / ".env").read_text(encoding="utf-8")
+    status, _, body = req(port, "POST", "/api/setup", {"upload_enabled": False}, app.token)
+    assert status == 200, body
+    assert app.settings.upload is False
+    assert json.loads(req(port, "GET", "/api/automation")[2])["auto_publish"] is False
+
+
+def test_upload_requests_require_a_connected_youtube_account(server):
+    app, port = server
+    app.settings = app.settings.with_overrides(upload=True)
+    app.studio.s = app.settings
+    status, _, body = req(port, "POST", "/api/make",
+                          {"topic": "test upload gate", "upload": True}, app.token)
+    assert status == 403 and b"Connect a YouTube account" in body
+    status, _, body = req(port, "POST", "/api/upload/1", {}, app.token)
+    assert status == 403 and b"Connect a YouTube account" in body
+
+
+def test_automation_publish_requires_upload_and_oauth(server):
+    app, port = server
+    status, _, body = req(port, "POST", "/api/automation", {"auto_publish": True}, app.token)
+    assert status == 400 and b"UPLOAD=false" in body
+
+    token = app.settings.data_path / "profiles" / "default" / "token.json"
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("test token", encoding="utf-8")
+    app.settings = app.settings.with_overrides(upload=True, token_file=str(token))
+    app.studio.s = app.settings
+    status, _, body = req(port, "POST", "/api/automation",
+                          {"auto_publish": True, "auto_produce": True, "auto_approve_ideas": True}, app.token)
+    assert status == 200, body
+    state = json.loads(req(port, "GET", "/api/automation")[2])
+    assert state["auto_publish"] is True and state["auto_produce"] is True
+    assert state["auto_approve_ideas"] is True
+
+
+def test_flush_uploads_worker_job_reports_completed_count(server, monkeypatch):
+    from purffle_shorts.pipeline import Studio as PipelineStudio
+    app, port = server
+    monkeypatch.setattr(PipelineStudio, "flush_queue", lambda self: 3)
+    jid = app.submit("flush_uploads", {}, "Retry queued uploads").id
+    job = _job(port, jid)
+    assert job["status"] == "done", job
+    assert job["result"]["uploaded"] == 3
+
+
+def test_new_settings_default_to_local_render_only():
+    from purffle_shorts.config import Settings
+    assert Settings().upload is False
+    assert Settings().max_uploads_24h == 2
+
+
+def test_scheduler_recovers_claimed_idea_after_restart(server, monkeypatch):
+    app, _ = server
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    idea_id = app.studio.history.add_idea("Recover this Short", approved=True)
+    claimed = app.studio.history.claim_idea(idea_id)
+    assert claimed["status"] == "pending"  # returned snapshot predates the claim update
+    app.studio.history.set_meta("studio_automation", json.dumps({
+        "enabled": True, "plan_time": "00:00", "timezone": "Asia/Kolkata", "ideas_per_run": 5,
+        "auto_approve_ideas": False, "auto_produce": True, "auto_publish": False, "auto_sync_stats": False,
+        "last_run": today, "last_status": "done", "last_production_run": today,
+        "last_production_status": "queued", "last_production_idea_id": idea_id,
+    }))
+    class OnePass:
+        calls = 0
+
+        def wait(self, _seconds):
+            self.calls += 1
+            return self.calls > 1
+    app._scheduler_stop = OnePass()
+    queued = []
+    class StubJob:
+        id = 456
+    monkeypatch.setattr(app, "submit", lambda kind, params, label="": (
+        queued.append((kind, params, label)) or StubJob()))
+    app._scheduler_loop()
+    assert queued and queued[0][0] == "make_idea"
+    assert queued[0][1]["idea_id"] == idea_id
+    recovered = app.studio.history.get_idea(idea_id)
+    assert recovered["status"] == "pending" and recovered["approved"] == 1
+
+
+def test_scheduler_retries_failed_production_after_cooldown(server, monkeypatch):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    app, _ = server
+    tz = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(tz)
+    today = now.date().isoformat()
+    idea_id = app.studio.history.add_idea("Retry this scheduled Short", approved=True)
+    app.studio.history.set_meta("studio_automation", json.dumps({
+        "enabled": True, "plan_time": "00:00", "timezone": "Asia/Kolkata", "ideas_per_run": 5,
+        "auto_approve_ideas": False, "auto_produce": True, "auto_publish": False, "auto_sync_stats": False,
+        "last_run": today, "last_status": "done", "last_production_run": today,
+        "last_production_status": "failed", "last_production_idea_id": idea_id,
+        "last_production_attempts": 1,
+        "last_production_retry_at": (now - timedelta(minutes=1)).isoformat(timespec="seconds"),
+    }))
+
+    class OnePass:
+        calls = 0
+
+        def wait(self, _seconds):
+            self.calls += 1
+            return self.calls > 1
+
+    app._scheduler_stop = OnePass()
+    queued = []
+
+    class StubJob:
+        id = 456
+
+    monkeypatch.setattr(app, "submit", lambda kind, params, label="": (
+        queued.append((kind, params, label)) or StubJob()))
+    app._scheduler_loop()
+
+    assert queued and queued[0][0] == "make_idea"
+    assert queued[0][1]["idea_id"] == idea_id
+    assert queued[0][1]["scheduled"] is True
+    state = app.automation_state()
+    assert state["last_production_status"] == "queued"
+    assert state["last_production_attempts"] == 1
+    assert state["last_production_retry_at"] is None
+
+
+def test_scheduler_does_not_retry_after_two_failed_attempts(server, monkeypatch):
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    app, _ = server
+    tz = ZoneInfo("Asia/Kolkata")
+    now = datetime.now(tz)
+    today = now.date().isoformat()
+    idea_id = app.studio.history.add_idea("Do not retry this Short again", approved=True)
+    app.studio.history.set_meta("studio_automation", json.dumps({
+        "enabled": True, "plan_time": "00:00", "timezone": "Asia/Kolkata", "ideas_per_run": 5,
+        "auto_approve_ideas": False, "auto_produce": True, "auto_publish": False, "auto_sync_stats": False,
+        "last_run": today, "last_status": "done", "last_production_run": today,
+        "last_production_status": "failed", "last_production_idea_id": idea_id,
+        "last_production_attempts": 2,
+        "last_production_retry_at": (now - timedelta(minutes=1)).isoformat(timespec="seconds"),
+    }))
+
+    class OnePass:
+        calls = 0
+
+        def wait(self, _seconds):
+            self.calls += 1
+            return self.calls > 1
+
+    app._scheduler_stop = OnePass()
+    queued = []
+    monkeypatch.setattr(app, "submit", lambda *args, **kwargs: queued.append((args, kwargs)))
+    app._scheduler_loop()
+
+    assert not any(args and args[0] == "make_idea" for args, _ in queued)
+    assert app.studio.history.get_idea(idea_id)["status"] == "pending"
+
+
+def test_scheduler_recovers_interrupted_upload_flush_after_restart(server, monkeypatch, tmp_path):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    app, _ = server
+    token = tmp_path / "token.json"
+    token.write_text("test token", encoding="utf-8")
+    app.settings = app.settings.with_overrides(upload=True, token_file=str(token))
+    app.studio.s = app.settings
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    app.studio.history.set_meta("studio_automation", json.dumps({
+        "enabled": True, "plan_time": "00:00", "timezone": "Asia/Kolkata", "ideas_per_run": 5,
+        "auto_approve_ideas": False, "auto_produce": False, "auto_publish": True, "auto_sync_stats": False,
+        "last_run": today, "last_status": "done", "last_upload_flush": today,
+        "last_upload_flush_message": "Queued uploads retry scheduled",
+    }))
+
+    class OnePass:
+        calls = 0
+
+        def wait(self, _seconds):
+            self.calls += 1
+            return self.calls > 1
+
+    app._scheduler_stop = OnePass()
+    queued = []
+
+    class StubJob:
+        id = 789
+
+    monkeypatch.setattr(app, "submit", lambda kind, params, label="": (
+        queued.append((kind, params, label)) or StubJob()))
+    app._scheduler_loop()
+
+    assert queued and queued[0][0] == "flush_uploads"
+    assert queued[0][1]["scheduled"] is True
+
+
+def test_scheduled_stats_sync_has_its_own_status(server, monkeypatch):
+    from purffle_shorts import analytics
+
+    app, port = server
+    monkeypatch.setattr(analytics, "sync_stats", lambda _settings, _history: 4)
+    jid = app.submit("stats", {"scheduled": True}, "Scheduled analytics sync").id
+    job = _job(port, jid)
+    assert job["status"] == "done", job
+    state = app.automation_state()
+    assert state["last_stats_status"] == "done"
+    assert state["last_stats_message"] == "Updated 4 video(s)"
+    assert state["last_production_message"] == ""
+
+
+def test_authorized_post_without_body_returns_json_error(server):
+    app, port = server
+    status, _, body = req(port, "POST", "/api/ideas", token=app.token)
+    assert status == 400
+    assert json.loads(body) == {"error": "empty idea"}
